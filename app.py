@@ -108,6 +108,38 @@ with st.sidebar:
                 for t in tracks:
                     st.write(f"- **{t['title']}** by {t['artist']['name']}")
 
+                st.write("")
+
+                # ── Export ────────────────────────────────────────────────
+                if tracks:
+                    csv_data = playlist_to_csv(tracks)
+                    st.download_button(
+                        "⬇️ Download CSV",
+                        data=csv_data,
+                        file_name=f"{pl['name']}.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                        key=f"csv_{pl['id']}",
+                    )
+                    if st.button("🎵 Open in Spotify", key=f"sp_{pl['id']}", use_container_width=True):
+                        st.session_state[f"show_sp_{pl['id']}"] = not st.session_state.get(f"show_sp_{pl['id']}", False)
+                        st.session_state[f"show_dz_{pl['id']}"] = False
+                    if st.session_state.get(f"show_sp_{pl['id']}"):
+                        for t in tracks:
+                            q = f"{t['title']} {t['artist']['name']}".replace(" ", "%20")
+                            st.markdown(f"[{t['title']}](https://open.spotify.com/search/{q})")
+
+                    if st.button("🎧 Open in Deezer", key=f"dz_{pl['id']}", use_container_width=True):
+                        st.session_state[f"show_dz_{pl['id']}"] = not st.session_state.get(f"show_dz_{pl['id']}", False)
+                        st.session_state[f"show_sp_{pl['id']}"] = False
+                    if st.session_state.get(f"show_dz_{pl['id']}"):
+                        for t in tracks:
+                            url = t.get("link", f"https://www.deezer.com/track/{t['id']}")
+                            st.markdown(f"[{t['title']}]({url})")
+
+                st.write("")
+
+                # ── Manage ────────────────────────────────────────────────
                 col_r, col_d = st.columns(2)
                 with col_r:
                     if st.button("✏️ Rename", key=f"ren_{pl['id']}", use_container_width=True):
