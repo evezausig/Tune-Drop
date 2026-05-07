@@ -51,6 +51,10 @@ if "user" not in st.session_state:
     st.session_state["user"] = None
 if "renaming_pl_id" not in st.session_state:
     st.session_state["renaming_pl_id"] = None
+if "open_playlist_tracks" not in st.session_state:
+    st.session_state["open_playlist_tracks"] = None
+if "open_playlist_name" not in st.session_state:
+    st.session_state["open_playlist_name"] = None
 
 def playlist_to_csv(tracks):
     output = io.StringIO()
@@ -129,8 +133,8 @@ with st.sidebar:
 
                 if tracks:
                     if st.button("▶️ Open playlist", key=f"open_{pl['id']}", use_container_width=True):
-                        st.session_state["tracks"] = tracks
-                        st.session_state["current_index"] = 0
+                        st.session_state["open_playlist_tracks"] = tracks
+                        st.session_state["open_playlist_name"] = pl["name"]
                         st.rerun()
 
                 st.write("")
@@ -393,38 +397,59 @@ if st.session_state["selected_genre"]:
                     start_new_session(recipe, mode="recipe")
                     st.rerun()
 
+# ----------- PLAYLIST LIST VIEW -----------
+if st.session_state["open_playlist_tracks"] is not None:
+    pl_tracks = st.session_state["open_playlist_tracks"]
+    pl_name = st.session_state["open_playlist_name"] or "Playlist"
+    st.write("---")
+    col_head, col_close = st.columns([5, 1])
+    with col_head:
+        st.subheader(f"📋 {pl_name}")
+    with col_close:
+        if st.button("✕ Close", use_container_width=True):
+            st.session_state["open_playlist_tracks"] = None
+            st.session_state["open_playlist_name"] = None
+            st.rerun()
+
+    for t in pl_tracks:
+        st.write(f"**{t['title']}** by {t['artist']['name']}")
+        if t.get("preview"):
+            st.audio(t["preview"], format="audio/mp3")
+        st.write("")
+
 # ----------- THE SWIPE VIEW -----------
-tracks = st.session_state["tracks"]
-index = st.session_state["current_index"]
+else:
+    tracks = st.session_state["tracks"]
+    index = st.session_state["current_index"]
 
-if len(tracks) > 0 and index < len(tracks):
-    current_track = tracks[index]
-    st.write("---")
-    st.image(current_track["album"]["cover_big"])
-    st.subheader(current_track["title"])
-    st.write(f"by **{current_track['artist']['name']}**")
-    st.caption(f"Song {index + 1} of {len(tracks)}")
-    st.audio(current_track["preview"])
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("👎 Skip"):
-            st.session_state["current_index"] += 1
-            st.rerun()
-    with col2:
-        if st.button("👍 Like"):
-            st.session_state["liked_songs"].append(current_track)
-            st.session_state["current_index"] += 1
-            st.rerun()
-    with col3:
-        if st.button("❤️ Save"):
-            st.session_state["saved_playlist"].append(current_track)
-            st.session_state["current_index"] += 1
-            st.rerun()
+    if len(tracks) > 0 and index < len(tracks):
+        current_track = tracks[index]
+        st.write("---")
+        st.image(current_track["album"]["cover_big"])
+        st.subheader(current_track["title"])
+        st.write(f"by **{current_track['artist']['name']}**")
+        st.caption(f"Song {index + 1} of {len(tracks)}")
+        st.audio(current_track["preview"])
 
-elif len(tracks) > 0 and index >= len(tracks):
-    st.write("---")
-    st.success("🎉 You've swiped through all the songs! Pick another vibe to discover more.")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("👎 Skip"):
+                st.session_state["current_index"] += 1
+                st.rerun()
+        with col2:
+            if st.button("👍 Like"):
+                st.session_state["liked_songs"].append(current_track)
+                st.session_state["current_index"] += 1
+                st.rerun()
+        with col3:
+            if st.button("❤️ Save"):
+                st.session_state["saved_playlist"].append(current_track)
+                st.session_state["current_index"] += 1
+                st.rerun()
+
+    elif len(tracks) > 0 and index >= len(tracks):
+        st.write("---")
+        st.success("🎉 You've swiped through all the songs! Pick another vibe to discover more.")
 
 
 # ----------- PLAYLIST -----------
