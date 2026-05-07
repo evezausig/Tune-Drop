@@ -52,6 +52,23 @@ if "user" not in st.session_state:
 if "renaming_pl_id" not in st.session_state:
     st.session_state["renaming_pl_id"] = None
 
+def playlist_to_csv(tracks):
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Title", "Artist", "Album", "Deezer Link", "Spotify Search"])
+    for t in tracks:
+        query = f"{t['title']} {t['artist']['name']}".replace(" ", "%20")
+        spotify_url = f"https://open.spotify.com/search/{query}"
+        writer.writerow([
+            t["title"],
+            t["artist"]["name"],
+            t.get("album", {}).get("title", ""),
+            t.get("link", f"https://www.deezer.com/track/{t['id']}"),
+            spotify_url,
+        ])
+    return output.getvalue()
+
+
 # ================================================================
 # SIDEBAR — account / saved playlists
 # ================================================================
@@ -266,22 +283,6 @@ def start_new_session(query, mode="search"):
     st.session_state["selected_genre"] = None
 
 
-def playlist_to_csv(tracks):
-    """Converts saved tracks to a CSV string with Deezer and Spotify links."""
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["Title", "Artist", "Album", "Deezer Link", "Spotify Search"])
-    for t in tracks:
-        query = f"{t['title']} {t['artist']['name']}".replace(" ", "%20")
-        spotify_url = f"https://open.spotify.com/search/{query}"
-        writer.writerow([
-            t["title"],
-            t["artist"]["name"],
-            t.get("album", {}).get("title", ""),
-            t.get("link", f"https://www.deezer.com/track/{t['id']}"),
-            spotify_url,
-        ])
-    return output.getvalue()
 
 
 # ================================================================
