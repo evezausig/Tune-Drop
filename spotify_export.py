@@ -67,14 +67,17 @@ def _headers(token):
 
 def _search_spotify_uri(title, artist, token):
     """Returns the Spotify URI for the best-matching track, or None."""
-    query = f"track:{title} artist:{artist}"
-    resp = requests.get(
-        f"{_API_URL}/search",
-        headers={"Authorization": f"Bearer {token}"},
-        params={"q": query, "type": "track", "limit": 1},
-    )
-    items = resp.json().get("tracks", {}).get("items", [])
-    return items[0]["uri"] if items else None
+    # Try strict field-filter search first, fall back to plain query
+    for query in [f"track:{title} artist:{artist}", f"{title} {artist}"]:
+        resp = requests.get(
+            f"{_API_URL}/search",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"q": query, "type": "track", "limit": 1},
+        )
+        items = resp.json().get("tracks", {}).get("items", [])
+        if items:
+            return items[0]["uri"]
+    return None
 
 
 def create_playlist(saved_tracks, token, name="Music-Tok Playlist"):
@@ -110,10 +113,13 @@ def create_playlist(saved_tracks, token, name="Music-Tok Playlist"):
 
     # 4. Add matched tracks (Spotify allows max 100 per request)
     for i in range(0, len(uris), 100):
-        requests.post(
+        add_resp = requests.post(
             f"{_API_URL}/playlists/{playlist_id}/tracks",
             headers=_headers(token),
             json={"uris": uris[i : i + 100]},
         )
+        add_data = add_resp.json()
+        if "error" in add_data:
+            raise Exception(f"Could not add tracks: {add_data['error'].get('message', add_data['error'])}")
 
     return playlist_url, len(uris), len(saved_tracks)
