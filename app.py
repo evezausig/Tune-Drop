@@ -128,19 +128,12 @@ with st.sidebar:
         for pl in playlists:
             tracks = db.get_playlist_tracks(pl["id"])
             with st.expander(f"📋 {pl['name']} ({len(tracks)} songs)"):
-                for t in tracks:
-                    st.write(f"- **{t['title']}** by {t['artist']['name']}")
-
                 if tracks:
                     if st.button("▶️ Open playlist", key=f"open_{pl['id']}", use_container_width=True):
                         st.session_state["open_playlist_tracks"] = tracks
                         st.session_state["open_playlist_name"] = pl["name"]
                         st.rerun()
 
-                st.write("")
-
-                # ── Export ────────────────────────────────────────────────
-                if tracks:
                     csv_data = playlist_to_csv(tracks)
                     st.download_button(
                         "⬇️ Download CSV",
@@ -150,21 +143,6 @@ with st.sidebar:
                         use_container_width=True,
                         key=f"csv_{pl['id']}",
                     )
-                    if st.button("🎵 Open in Spotify", key=f"sp_{pl['id']}", use_container_width=True):
-                        st.session_state[f"show_sp_{pl['id']}"] = not st.session_state.get(f"show_sp_{pl['id']}", False)
-                        st.session_state[f"show_dz_{pl['id']}"] = False
-                    if st.session_state.get(f"show_sp_{pl['id']}"):
-                        for t in tracks:
-                            q = f"{t['title']} {t['artist']['name']}".replace(" ", "%20")
-                            st.markdown(f"[{t['title']}](https://open.spotify.com/search/{q})")
-
-                    if st.button("🎧 Open in Deezer", key=f"dz_{pl['id']}", use_container_width=True):
-                        st.session_state[f"show_dz_{pl['id']}"] = not st.session_state.get(f"show_dz_{pl['id']}", False)
-                        st.session_state[f"show_sp_{pl['id']}"] = False
-                    if st.session_state.get(f"show_dz_{pl['id']}"):
-                        for t in tracks:
-                            url = t.get("link", f"https://www.deezer.com/track/{t['id']}")
-                            st.markdown(f"[{t['title']}]({url})")
 
                 st.write("")
 
@@ -416,6 +394,25 @@ if st.session_state["open_playlist_tracks"] is not None:
         if t.get("preview"):
             st.audio(t["preview"], format="audio/mp3")
         st.write("")
+
+    st.write("---")
+    link_col1, link_col2 = st.columns(2)
+    with link_col1:
+        if st.button("🎵 Open in Spotify", key="pl_view_sp", use_container_width=True):
+            st.session_state["pl_view_show_sp"] = not st.session_state.get("pl_view_show_sp", False)
+            st.session_state["pl_view_show_dz"] = False
+        if st.session_state.get("pl_view_show_sp"):
+            for t in pl_tracks:
+                q = f"{t['title']} {t['artist']['name']}".replace(" ", "%20")
+                st.markdown(f"[{t['title']}](https://open.spotify.com/search/{q})")
+    with link_col2:
+        if st.button("🎧 Open in Deezer", key="pl_view_dz", use_container_width=True):
+            st.session_state["pl_view_show_dz"] = not st.session_state.get("pl_view_show_dz", False)
+            st.session_state["pl_view_show_sp"] = False
+        if st.session_state.get("pl_view_show_dz"):
+            for t in pl_tracks:
+                url = t.get("link", f"https://www.deezer.com/track/{t['id']}")
+                st.markdown(f"[{t['title']}]({url})")
 
 # ----------- THE SWIPE VIEW -----------
 else:
