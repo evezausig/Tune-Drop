@@ -172,19 +172,9 @@ with st.sidebar:
         if not liked:
             st.caption("No liked songs yet. Tap 👍 while discovering.")
         else:
-            for i, t in enumerate(liked):
-                col_title, col_remove = st.columns([4, 1])
-                with col_title:
-                    st.write(f"**{t['title']}** by {t['artist']['name']}")
-                with col_remove:
-                    if st.button("✕", key=f"unlike_{i}"):
-                        st.session_state["liked_songs"].pop(i)
-                        st.rerun()
-
-            if st.button("🔁 Rediscover liked songs", use_container_width=True):
-                st.session_state["tracks"] = liked.copy()
-                st.session_state["current_index"] = 0
-                st.session_state["liked_songs"] = []
+            if st.button("▶️ Open liked songs", use_container_width=True):
+                st.session_state["open_playlist_tracks"] = liked.copy()
+                st.session_state["open_playlist_name"] = "👍 Liked Songs"
                 st.rerun()
 
             if st.button("🗑️ Clear liked songs", use_container_width=True):
