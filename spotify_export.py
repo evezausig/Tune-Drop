@@ -89,9 +89,9 @@ def create_playlist(saved_tracks, token, name="Music-Tok Playlist"):
         raise Exception(f"Spotify API error: {me['error'].get('message', me['error'])} (status {me['error'].get('status', '?')})")
     user_id = me["id"]
 
-    # 2. Create an empty playlist
+    # 2. Create an empty playlist (use /me/playlists — less restricted than /users/{id}/playlists)
     pl_resp = requests.post(
-        f"{_API_URL}/users/{user_id}/playlists",
+        f"{_API_URL}/me/playlists",
         headers=_headers(token),
         json={"name": name, "public": True, "description": "Exported from Music-Tok 🎵"},
     )
