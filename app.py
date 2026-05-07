@@ -127,6 +127,12 @@ with st.sidebar:
                 for t in tracks:
                     st.write(f"- **{t['title']}** by {t['artist']['name']}")
 
+                if tracks:
+                    if st.button("▶️ Open playlist", key=f"open_{pl['id']}", use_container_width=True):
+                        st.session_state["tracks"] = tracks
+                        st.session_state["current_index"] = 0
+                        st.rerun()
+
                 st.write("")
 
                 # ── Export ────────────────────────────────────────────────
