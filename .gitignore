@@ -3,3 +3,12 @@ __pycache__/
 .DS_Store
 *.pyc
 .env
+
+# Don't push secrets to GitHub
+.streamlit/secrets.toml
+
+# Don't push the large dataset (Streamlit Cloud will download it)
+spotify_tracks.csv
+
+# Claude Code working files
+.claude/

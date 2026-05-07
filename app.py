@@ -1,9 +1,37 @@
+import io
+import csv
 import streamlit as st
 import requests
-import random  # We'll use this to shuffle the songs for discovery
+import random
+from emotion_recipes import EMOTION_RECIPES
+from genre_recipes import GENRE_RECIPES
+from metadata_filter import find_matching_songs
+from concurrent.futures import ThreadPoolExecutor
+import spotify_export
+import deezer_export
 
 st.title("Music-Tok 🎵")
 st.write("Discover new music, one song at a time")
+
+# ── OAuth callbacks (must run before any UI is rendered) ──────────────────────
+_params = dict(st.query_params)
+if _params.get("state") == "spotify" and "code" in _params:
+    try:
+        token_info = spotify_export.exchange_code(_params["code"])
+        st.session_state["spotify_token"] = token_info["access_token"]
+        st.success("✅ Connected to Spotify!")
+    except Exception as e:
+        st.error(f"Spotify auth failed: {e}")
+    st.query_params.clear()
+
+elif _params.get("state") == "deezer" and "code" in _params:
+    try:
+        token_info = deezer_export.exchange_code(_params["code"])
+        st.session_state["deezer_token"] = token_info["access_token"]
+        st.success("✅ Connected to Deezer!")
+    except Exception as e:
+        st.error(f"Deezer auth failed: {e}")
+    st.query_params.clear()
 
 # ----------- SESSION STATE SETUP -----------
 if "tracks" not in st.session_state:
@@ -12,6 +40,14 @@ if "current_index" not in st.session_state:
     st.session_state["current_index"] = 0
 if "saved_playlist" not in st.session_state:
     st.session_state["saved_playlist"] = []
+if "selected_emotion" not in st.session_state:
+    st.session_state["selected_emotion"] = None
+if "selected_genre" not in st.session_state:
+    st.session_state["selected_genre"] = None
+if "spotify_token" not in st.session_state:
+    st.session_state["spotify_token"] = None
+if "deezer_token" not in st.session_state:
+    st.session_state["deezer_token"] = None
 
 # ================================================================
 # HELPER FUNCTIONS — the "brain" of the app
@@ -19,86 +55,116 @@ if "saved_playlist" not in st.session_state:
 
 def get_tracks_from_playlist(playlist_query):
     """Finds a Deezer playlist matching the query and returns its tracks."""
-    # Step 1: search Deezer for playlists matching this vibe
     url = f"https://api.deezer.com/search/playlist?q={playlist_query}"
     response = requests.get(url)
     playlists = response.json().get("data", [])
-    
     if len(playlists) == 0:
-        return []  # No playlist found, return empty list
-    
-    # Step 2: take the first (most popular) playlist
+        return []
     playlist_id = playlists[0]["id"]
-    
-    # Step 3: fetch the tracks in that playlist
     tracks_url = f"https://api.deezer.com/playlist/{playlist_id}"
     tracks_response = requests.get(tracks_url)
     playlist_data = tracks_response.json()
-    
     return playlist_data.get("tracks", {}).get("data", [])
 
 
 def get_tracks_from_artist_discovery(artist_name):
     """Finds an artist + similar artists, returns a mixed list of their top tracks."""
-    # Step 1: search for the artist
     search_url = f"https://api.deezer.com/search/artist?q={artist_name}"
     response = requests.get(search_url)
     artists = response.json().get("data", [])
-    
     if len(artists) == 0:
-        return []  # Artist not found
-    
-    # Step 2: get that artist's ID
+        return []
     main_artist_id = artists[0]["id"]
-    
-    # Step 3: get top tracks from the main artist (just a few, so similar artists get space)
     all_tracks = []
     top_url = f"https://api.deezer.com/artist/{main_artist_id}/top?limit=5"
     top_response = requests.get(top_url)
     all_tracks.extend(top_response.json().get("data", []))
-    
-    # Step 4: find similar artists
     related_url = f"https://api.deezer.com/artist/{main_artist_id}/related"
     related_response = requests.get(related_url)
     similar_artists = related_response.json().get("data", [])
-    
-    # Step 5: from each similar artist, grab their top 3 songs
-    for artist in similar_artists[:8]:  # just take the first 8 similar artists
+    for artist in similar_artists[:8]:
         artist_top_url = f"https://api.deezer.com/artist/{artist['id']}/top?limit=3"
         artist_top_response = requests.get(artist_top_url)
         all_tracks.extend(artist_top_response.json().get("data", []))
-    
     return all_tracks
 
 
-def build_discovery_queue(query, is_vibe=False):
-    """The MAIN function — decides which strategy to use and returns a shuffled list of tracks."""
-    if is_vibe:
-        # Vibes use the playlist strategy
+# 🆕 NEW: This is the magic function. It takes our Kaggle-filtered songs
+# and looks each one up on Deezer to get a playable preview.
+def _fetch_one_deezer_track(song):
+    """Helper: search Deezer for a single song."""
+    query = f'{song["track_name"]} {song["artist"]}'
+    search_url = f"https://api.deezer.com/search/track?q={query}&limit=1"
+    try:
+        response = requests.get(search_url, timeout=5)
+        results = response.json().get("data", [])
+        return results[0] if results else None
+    except Exception:
+        return None
+
+
+def get_tracks_from_recipe(recipe):
+    """
+    Filters Kaggle dataset by emotion recipe, then fetches all matches
+    from Deezer IN PARALLEL (much faster).
+    """
+    matching_songs = find_matching_songs(recipe, limit=25)
+    if len(matching_songs) == 0:
+        return []
+    
+    # 🚀 FIX 1: Fire all Deezer requests at once instead of one at a time
+    from concurrent.futures import ThreadPoolExecutor
+    
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        results = executor.map(_fetch_one_deezer_track, matching_songs)
+    
+    # Filter out the None values (failed searches)
+    deezer_tracks = [t for t in results if t is not None]
+    return deezer_tracks
+
+
+def build_discovery_queue(query, mode="search"):
+    """Decides which strategy to use and returns a shuffled list of tracks."""
+    if mode == "vibe":
         tracks = get_tracks_from_playlist(query)
-    else:
-        # Artist/keyword search uses the discovery strategy
+    elif mode == "recipe":
+        tracks = get_tracks_from_recipe(query)
+    else:  # mode == "search"
         tracks = get_tracks_from_artist_discovery(query)
-        
-        # If the artist search found nothing, fall back to a regular keyword search
         if len(tracks) == 0:
             fallback_url = f"https://api.deezer.com/search?q={query}"
             fallback_response = requests.get(fallback_url)
             tracks = fallback_response.json().get("data", [])
-    
-    # Remove tracks that have no preview (some songs don't have one)
+
     tracks = [t for t in tracks if t.get("preview")]
-    
-    # Shuffle them so each session feels different
     random.shuffle(tracks)
-    
     return tracks
 
 
-def start_new_session(query, is_vibe=False):
+def start_new_session(query, mode="search"):
     """Resets the queue with new tracks."""
-    st.session_state["tracks"] = build_discovery_queue(query, is_vibe=is_vibe)
+    st.session_state["tracks"] = build_discovery_queue(query, mode=mode)
     st.session_state["current_index"] = 0
+    st.session_state["selected_emotion"] = None
+    st.session_state["selected_genre"] = None
+
+
+def playlist_to_csv(tracks):
+    """Converts saved tracks to a CSV string with Deezer and Spotify links."""
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Title", "Artist", "Album", "Deezer Link", "Spotify Search"])
+    for t in tracks:
+        query = f"{t['title']} {t['artist']['name']}".replace(" ", "%20")
+        spotify_url = f"https://open.spotify.com/search/{query}"
+        writer.writerow([
+            t["title"],
+            t["artist"]["name"],
+            t.get("album", {}).get("title", ""),
+            t.get("link", f"https://www.deezer.com/track/{t['id']}"),
+            spotify_url,
+        ])
+    return output.getvalue()
 
 
 # ================================================================
@@ -109,31 +175,72 @@ def start_new_session(query, is_vibe=False):
 search_query = st.text_input("Search an artist, song, or genre", placeholder="e.g. Taylor Swift, jazz, The Weeknd")
 
 if st.button("Start discovering 🎧"):
-    if search_query.strip():  # only search if something was typed
-        start_new_session(search_query, is_vibe=False)
+    if search_query.strip():
+        start_new_session(search_query, mode="search")
 
-# ----------- VIBE BUTTONS -----------
-st.write("**Or pick a vibe:**")
+# ----------- 🆕 NEW: PERSONALIZED EMOTION PICKER -----------
+st.write("**How are you feeling?**")
+st.caption("Pick an emotion, then tell us what it means to *you*.")
 
-vibes = {
-    "😌 Chill": "chill vibes",
-    "🍽️ Dinner Party": "dinner party",
-    "💪 Workout": "workout motivation",
-    "🚗 Road Trip": "road trip",
-    "🥲 Sad": "sad songs",
-    "🎉 Party": "party hits",
-    "🌙 Late Night": "late night",
-    "🧠 Focus": "focus study",
-}
+emotion_cols = st.columns(len(EMOTION_RECIPES))
+emotion_names = list(EMOTION_RECIPES.keys())
 
-vibe_cols = st.columns(4)
-vibe_names = list(vibes.keys())
+for i, emotion in enumerate(emotion_names):
+    with emotion_cols[i]:
+        if st.button(emotion, key=f"emotion_{i}"):
+            st.session_state["selected_emotion"] = emotion
+            st.session_state["selected_genre"] = None  # close genre picker
+            st.session_state["tracks"] = []
 
-for i in range(len(vibe_names)):
-    col = vibe_cols[i % 4]
-    with col:
-        if st.button(vibe_names[i]):
-            start_new_session(vibes[vibe_names[i]], is_vibe=True)
+# ----------- 🆕 NEW: SUB-CATEGORY PICKER (shows after emotion selected) -----------
+if st.session_state["selected_emotion"]:
+    emotion = st.session_state["selected_emotion"]
+    st.write(f"### What does **{emotion}** mean to you?")
+    
+    sub_categories = EMOTION_RECIPES[emotion]
+    sub_cols = st.columns(2)
+    sub_names = list(sub_categories.keys())
+    
+    for i, sub in enumerate(sub_names):
+        col = sub_cols[i % 2]
+        with col:
+            if st.button(sub, key=f"sub_{i}", use_container_width=True):
+                with st.spinner(f"Finding songs that feel like '{sub}'..."):
+                    recipe = sub_categories[sub]
+                    start_new_session(recipe, mode="recipe")
+                    st.rerun()
+
+# ----------- GENRE PICKER -----------
+st.write("**Or explore a genre:**")
+st.caption("Pick a genre, then choose your style.")
+
+genre_cols = st.columns(4)
+genre_names = list(GENRE_RECIPES.keys())
+
+for i, name in enumerate(genre_names):
+    with genre_cols[i % 4]:
+        if st.button(name, key=f"genre_{i}"):
+            st.session_state["selected_genre"] = name
+            st.session_state["selected_emotion"] = None  # close emotion picker
+            st.session_state["tracks"] = []
+
+# ----------- GENRE SUB-CATEGORY PICKER -----------
+if st.session_state["selected_genre"]:
+    genre = st.session_state["selected_genre"]
+    st.write(f"### What kind of **{genre}**?")
+
+    sub_categories = GENRE_RECIPES[genre]
+    sub_cols = st.columns(2)
+    sub_names = list(sub_categories.keys())
+
+    for i, sub in enumerate(sub_names):
+        col = sub_cols[i % 2]
+        with col:
+            if st.button(sub, key=f"genre_sub_{i}", use_container_width=True):
+                with st.spinner(f"Finding {sub} tracks..."):
+                    recipe = sub_categories[sub]
+                    start_new_session(recipe, mode="recipe")
+                    st.rerun()
 
 # ----------- THE SWIPE VIEW -----------
 tracks = st.session_state["tracks"]
@@ -141,7 +248,6 @@ index = st.session_state["current_index"]
 
 if len(tracks) > 0 and index < len(tracks):
     current_track = tracks[index]
-    
     st.write("---")
     st.image(current_track["album"]["cover_big"])
     st.subheader(current_track["title"])
@@ -166,14 +272,77 @@ if len(tracks) > 0 and index < len(tracks):
 
 elif len(tracks) > 0 and index >= len(tracks):
     st.write("---")
-    st.success("🎉 You've swiped through all the songs! Search again to discover more.")
+    st.success("🎉 You've swiped through all the songs! Pick another vibe to discover more.")
 
 # ----------- PLAYLIST -----------
 st.write("---")
-st.header(f"❤️ My Playlist ({len(st.session_state['saved_playlist'])} songs)")
+saved_playlist = st.session_state["saved_playlist"]
+st.header(f"❤️ My Playlist ({len(saved_playlist)} songs)")
 
-if len(st.session_state["saved_playlist"]) == 0:
+if len(saved_playlist) == 0:
     st.write("No songs saved yet. Tap ❤️ on songs you love!")
 else:
-    for saved in st.session_state["saved_playlist"]:
-        st.write(f"- **{saved['title']}** by {saved['artist']['name']}")
+    for saved in saved_playlist:
+        deezer_url = saved.get("link", f"https://www.deezer.com/track/{saved['id']}")
+        st.write(f"- **{saved['title']}** by {saved['artist']['name']} — [Open in Deezer]({deezer_url})")
+
+    st.write("")
+    st.subheader("Export playlist")
+
+    export_col1, export_col2, export_col3 = st.columns(3)
+
+    # ── CSV download ──────────────────────────────────────────────────────────
+    with export_col1:
+        csv_data = playlist_to_csv(saved_playlist)
+        st.download_button(
+            label="⬇️ Download CSV",
+            data=csv_data,
+            file_name="my_playlist.csv",
+            mime="text/csv",
+            use_container_width=True,
+            help="Includes Deezer & Spotify search links for every song",
+        )
+
+    # ── Spotify ───────────────────────────────────────────────────────────────
+    with export_col2:
+        if not spotify_export.is_configured():
+            st.button("🎵 Export to Spotify", disabled=True, use_container_width=True,
+                      help="Add SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET to .streamlit/secrets.toml")
+        elif not st.session_state["spotify_token"]:
+            auth_url = spotify_export.get_auth_url()
+            st.link_button("🎵 Connect Spotify", auth_url, use_container_width=True)
+        else:
+            if st.button("🎵 Export to Spotify", use_container_width=True):
+                with st.spinner("Creating Spotify playlist…"):
+                    try:
+                        url, matched, total = spotify_export.create_playlist(
+                            saved_playlist, st.session_state["spotify_token"]
+                        )
+                        st.success(f"✅ {matched}/{total} songs added!")
+                        st.link_button("Open playlist on Spotify →", url)
+                    except Exception as e:
+                        st.error(f"Failed: {e}")
+                        st.session_state["spotify_token"] = None
+
+    # ── Deezer ────────────────────────────────────────────────────────────────
+    with export_col3:
+        if not deezer_export.is_configured():
+            st.button("🎧 Export to Deezer", disabled=True, use_container_width=True,
+                      help="Add DEEZER_APP_ID and DEEZER_SECRET to .streamlit/secrets.toml")
+        elif not st.session_state["deezer_token"]:
+            auth_url = deezer_export.get_auth_url()
+            st.link_button("🎧 Connect Deezer", auth_url, use_container_width=True)
+        else:
+            if st.button("🎧 Export to Deezer", use_container_width=True):
+                with st.spinner("Creating Deezer playlist…"):
+                    try:
+                        url, added, total = deezer_export.create_playlist(
+                            saved_playlist, st.session_state["deezer_token"]
+                        )
+                        st.success(f"✅ {added}/{total} songs added!")
+                        st.link_button("Open playlist on Deezer →", url)
+                    except Exception as e:
+                        st.error(f"Failed: {e}")
+                        st.session_state["deezer_token"] = None
+
+    st.caption("🍎 Apple Music requires a paid Apple Developer account ($99/yr) · 📦 Amazon Music has no public playlist API")
