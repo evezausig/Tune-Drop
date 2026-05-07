@@ -39,6 +39,8 @@ if "spotify_token" not in st.session_state:
     st.session_state["spotify_token"] = None
 if "show_spotify_links" not in st.session_state:
     st.session_state["show_spotify_links"] = False
+if "show_deezer_links" not in st.session_state:
+    st.session_state["show_deezer_links"] = False
 
 # ================================================================
 # HELPER FUNCTIONS — the "brain" of the app
@@ -280,7 +282,7 @@ else:
     st.write("")
     st.subheader("Export playlist")
 
-    export_col1, export_col2 = st.columns(2)
+    export_col1, export_col2, export_col3 = st.columns(3)
 
     # ── CSV download ──────────────────────────────────────────────────────────
     with export_col1:
@@ -298,10 +300,23 @@ else:
     with export_col2:
         if st.button("🎵 Open in Spotify", use_container_width=True):
             st.session_state["show_spotify_links"] = True
+            st.session_state["show_deezer_links"] = False
+
+    # ── Deezer ────────────────────────────────────────────────────────────────
+    with export_col3:
+        if st.button("🎧 Open in Deezer", use_container_width=True):
+            st.session_state["show_deezer_links"] = True
+            st.session_state["show_spotify_links"] = False
 
     if st.session_state.get("show_spotify_links"):
         st.write("**Search each song on Spotify:**")
         for t in saved_playlist:
             q = f"{t['title']} {t['artist']['name']}".replace(" ", "%20")
             url = f"https://open.spotify.com/search/{q}"
+            st.markdown(f"- [{t['title']} — {t['artist']['name']}]({url})")
+
+    if st.session_state.get("show_deezer_links"):
+        st.write("**Open each song on Deezer:**")
+        for t in saved_playlist:
+            url = t.get("link", f"https://www.deezer.com/track/{t['id']}")
             st.markdown(f"- [{t['title']} — {t['artist']['name']}]({url})")
