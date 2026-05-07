@@ -383,7 +383,8 @@ else:
                 if new_pl_name.strip():
                     pl_id = db.create_playlist(user["id"], new_pl_name.strip())
                     db.add_tracks_to_playlist(pl_id, saved_playlist)
-                    st.success(f"✅ Saved to **{new_pl_name}**!")
+                    st.session_state["saved_playlist"] = []
+                    st.success(f"✅ Saved to **{new_pl_name}**! Like new songs to build your next playlist.")
                     st.rerun()
                 else:
                     st.warning("Enter a playlist name first.")
@@ -392,7 +393,8 @@ else:
             if st.button("💾 Add to playlist", use_container_width=True):
                 pl_id = next(pl["id"] for pl in existing if pl["name"] == chosen)
                 db.add_tracks_to_playlist(pl_id, saved_playlist)
-                st.success(f"✅ Added to **{chosen}**!")
+                st.session_state["saved_playlist"] = []
+                st.success(f"✅ Added to **{chosen}**! Like new songs to build your next playlist.")
                 st.rerun()
     else:
         st.caption("🔒 [Log in](#) to save playlists to your account.")
