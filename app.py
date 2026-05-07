@@ -55,6 +55,8 @@ if "open_playlist_tracks" not in st.session_state:
     st.session_state["open_playlist_tracks"] = None
 if "open_playlist_name" not in st.session_state:
     st.session_state["open_playlist_name"] = None
+if "open_playlist_is_liked" not in st.session_state:
+    st.session_state["open_playlist_is_liked"] = False
 
 def playlist_to_csv(tracks):
     output = io.StringIO()
@@ -132,6 +134,7 @@ with st.sidebar:
                     if st.button("▶️ Open playlist", key=f"open_{pl['id']}", use_container_width=True):
                         st.session_state["open_playlist_tracks"] = tracks
                         st.session_state["open_playlist_name"] = pl["name"]
+                        st.session_state["open_playlist_is_liked"] = False
                         st.rerun()
 
                     csv_data = playlist_to_csv(tracks)
@@ -173,8 +176,9 @@ with st.sidebar:
             st.caption("No liked songs yet. Tap 👍 while discovering.")
         else:
             if st.button("▶️ Open liked songs", use_container_width=True):
-                st.session_state["open_playlist_tracks"] = liked.copy()
+                st.session_state["open_playlist_tracks"] = "liked"
                 st.session_state["open_playlist_name"] = "👍 Liked Songs"
+                st.session_state["open_playlist_is_liked"] = True
                 st.rerun()
 
             if st.button("🗑️ Clear liked songs", use_container_width=True):
@@ -367,42 +371,58 @@ if st.session_state["selected_genre"]:
 
 # ----------- PLAYLIST LIST VIEW -----------
 if st.session_state["open_playlist_tracks"] is not None:
-    pl_tracks = st.session_state["open_playlist_tracks"]
+    is_liked_view = st.session_state["open_playlist_is_liked"]
+    pl_tracks = st.session_state["liked_songs"] if is_liked_view else st.session_state["open_playlist_tracks"]
     pl_name = st.session_state["open_playlist_name"] or "Playlist"
     st.write("---")
     col_head, col_close = st.columns([5, 1])
     with col_head:
-        st.subheader(f"📋 {pl_name}")
+        st.subheader(f"{pl_name}")
     with col_close:
         if st.button("✕ Close", use_container_width=True):
             st.session_state["open_playlist_tracks"] = None
             st.session_state["open_playlist_name"] = None
+            st.session_state["open_playlist_is_liked"] = False
             st.rerun()
 
-    for t in pl_tracks:
+    if is_liked_view and not pl_tracks:
+        st.caption("No liked songs. Tap 👍 while discovering to add some.")
+
+    for i, t in enumerate(pl_tracks):
         st.write(f"**{t['title']}** by {t['artist']['name']}")
         if t.get("preview"):
             st.audio(t["preview"], format="audio/mp3")
+        if is_liked_view:
+            btn_col1, btn_col2 = st.columns(2)
+            with btn_col1:
+                if st.button("❤️ Save to playlist", key=f"liked_save_{i}", use_container_width=True):
+                    st.session_state["saved_playlist"].append(t)
+                    st.rerun()
+            with btn_col2:
+                if st.button("👎 Unlike", key=f"liked_remove_{i}", use_container_width=True):
+                    st.session_state["liked_songs"].pop(i)
+                    st.rerun()
         st.write("")
 
-    st.write("---")
-    link_col1, link_col2 = st.columns(2)
-    with link_col1:
-        if st.button("🎵 Open in Spotify", key="pl_view_sp", use_container_width=True):
-            st.session_state["pl_view_show_sp"] = not st.session_state.get("pl_view_show_sp", False)
-            st.session_state["pl_view_show_dz"] = False
-        if st.session_state.get("pl_view_show_sp"):
-            for t in pl_tracks:
-                q = f"{t['title']} {t['artist']['name']}".replace(" ", "%20")
-                st.markdown(f"[{t['title']}](https://open.spotify.com/search/{q})")
-    with link_col2:
-        if st.button("🎧 Open in Deezer", key="pl_view_dz", use_container_width=True):
-            st.session_state["pl_view_show_dz"] = not st.session_state.get("pl_view_show_dz", False)
-            st.session_state["pl_view_show_sp"] = False
-        if st.session_state.get("pl_view_show_dz"):
-            for t in pl_tracks:
-                url = t.get("link", f"https://www.deezer.com/track/{t['id']}")
-                st.markdown(f"[{t['title']}]({url})")
+    if not is_liked_view:
+        st.write("---")
+        link_col1, link_col2 = st.columns(2)
+        with link_col1:
+            if st.button("🎵 Open in Spotify", key="pl_view_sp", use_container_width=True):
+                st.session_state["pl_view_show_sp"] = not st.session_state.get("pl_view_show_sp", False)
+                st.session_state["pl_view_show_dz"] = False
+            if st.session_state.get("pl_view_show_sp"):
+                for t in pl_tracks:
+                    q = f"{t['title']} {t['artist']['name']}".replace(" ", "%20")
+                    st.markdown(f"[{t['title']}](https://open.spotify.com/search/{q})")
+        with link_col2:
+            if st.button("🎧 Open in Deezer", key="pl_view_dz", use_container_width=True):
+                st.session_state["pl_view_show_dz"] = not st.session_state.get("pl_view_show_dz", False)
+                st.session_state["pl_view_show_sp"] = False
+            if st.session_state.get("pl_view_show_dz"):
+                for t in pl_tracks:
+                    url = t.get("link", f"https://www.deezer.com/track/{t['id']}")
+                    st.markdown(f"[{t['title']}]({url})")
 
 # ----------- THE SWIPE VIEW -----------
 else:
