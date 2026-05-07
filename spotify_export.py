@@ -65,10 +65,15 @@ def _headers(token):
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
 
-def _search_spotify_uri(title, artist, token):
+def _search_spotify_uri(title, artist, token, isrc=None):
     """Returns the Spotify URI for the best-matching track, or None."""
-    # Try strict field-filter search first, fall back to plain query
-    for query in [f"track:{title} artist:{artist}", f"{title} {artist}"]:
+    queries = []
+    if isrc:
+        queries.append(f"isrc:{isrc}")       # exact match via international ID
+    queries.append(f"track:{title} artist:{artist}")  # field-filter fallback
+    queries.append(f"{title} {artist}")               # plain-text fallback
+
+    for query in queries:
         resp = requests.get(
             f"{_API_URL}/search",
             headers={"Authorization": f"Bearer {token}"},
@@ -96,7 +101,7 @@ def create_playlist(saved_tracks, token, name="Music-Tok Playlist"):
     pl_resp = requests.post(
         f"{_API_URL}/me/playlists",
         headers=_headers(token),
-        json={"name": name, "public": True, "description": "Exported from Music-Tok 🎵"},
+        json={"name": name, "public": False, "description": "Exported from Music-Tok 🎵"},
     )
     playlist = pl_resp.json()
     if "error" in playlist:
@@ -104,10 +109,12 @@ def create_playlist(saved_tracks, token, name="Music-Tok Playlist"):
     playlist_id  = playlist["id"]
     playlist_url = playlist["external_urls"]["spotify"]
 
-    # 3. Search Spotify for each saved track
+    # 3. Search Spotify for each saved track (use ISRC when available for exact match)
     uris = []
     for t in saved_tracks:
-        uri = _search_spotify_uri(t["title"], t["artist"]["name"], token)
+        uri = _search_spotify_uri(
+            t["title"], t["artist"]["name"], token, isrc=t.get("isrc")
+        )
         if uri:
             uris.append(uri)
 
