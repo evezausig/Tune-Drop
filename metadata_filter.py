@@ -50,6 +50,8 @@ def find_matching_songs(recipe, genre_group=None, limit=25):
             filtered = filtered[
                 (filtered[feature] >= low) & (filtered[feature] <= high)
             ]
+        elif isinstance(value, list):
+            filtered = filtered[filtered[feature].isin(value)]
         else:
             filtered = filtered[filtered[feature] == value]
     
