@@ -48,6 +48,8 @@ if "spotify_token" not in st.session_state:
     st.session_state["spotify_token"] = None
 if "deezer_token" not in st.session_state:
     st.session_state["deezer_token"] = None
+if "show_spotify_links" not in st.session_state:
+    st.session_state["show_spotify_links"] = False
 
 # ================================================================
 # HELPER FUNCTIONS — the "brain" of the app
@@ -305,24 +307,15 @@ else:
 
     # ── Spotify ───────────────────────────────────────────────────────────────
     with export_col2:
-        if not spotify_export.is_configured():
-            st.button("🎵 Export to Spotify", disabled=True, use_container_width=True,
-                      help="Add SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET to .streamlit/secrets.toml")
-        elif not st.session_state["spotify_token"]:
-            auth_url = spotify_export.get_auth_url()
-            st.link_button("🎵 Connect Spotify", auth_url, use_container_width=True)
-        else:
-            if st.button("🎵 Export to Spotify", use_container_width=True):
-                with st.spinner("Creating Spotify playlist…"):
-                    try:
-                        url, matched, total = spotify_export.create_playlist(
-                            saved_playlist, st.session_state["spotify_token"]
-                        )
-                        st.success(f"✅ {matched}/{total} songs added!")
-                        st.link_button("Open playlist on Spotify →", url)
-                    except Exception as e:
-                        st.error(f"Failed: {e}")
-                        st.session_state["spotify_token"] = None
+        if st.button("🎵 Open in Spotify", use_container_width=True):
+            st.session_state["show_spotify_links"] = True
+
+    if st.session_state.get("show_spotify_links"):
+        st.write("**Search each song on Spotify:**")
+        for t in saved_playlist:
+            q = f"{t['title']} {t['artist']['name']}".replace(" ", "%20")
+            url = f"https://open.spotify.com/search/{q}"
+            st.markdown(f"- [{t['title']} — {t['artist']['name']}]({url})")
 
     # ── Deezer ────────────────────────────────────────────────────────────────
     with export_col3:
