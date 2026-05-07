@@ -176,6 +176,33 @@ with st.sidebar:
                             st.session_state["renaming_pl_id"] = None
                             st.rerun()
 
+        # ── Liked Songs ───────────────────────────────────────────────────────
+        st.write("---")
+        liked = st.session_state["liked_songs"]
+        st.write(f"**👍 Liked Songs ({len(liked)})**")
+
+        if not liked:
+            st.caption("No liked songs yet. Tap 👍 while discovering.")
+        else:
+            for i, t in enumerate(liked):
+                col_title, col_remove = st.columns([4, 1])
+                with col_title:
+                    st.write(f"**{t['title']}** by {t['artist']['name']}")
+                with col_remove:
+                    if st.button("✕", key=f"unlike_{i}"):
+                        st.session_state["liked_songs"].pop(i)
+                        st.rerun()
+
+            if st.button("🔁 Rediscover liked songs", use_container_width=True):
+                st.session_state["tracks"] = liked.copy()
+                st.session_state["current_index"] = 0
+                st.session_state["liked_songs"] = []
+                st.rerun()
+
+            if st.button("🗑️ Clear liked songs", use_container_width=True):
+                st.session_state["liked_songs"] = []
+                st.rerun()
+
 
 # ================================================================
 # HELPER FUNCTIONS — the "brain" of the app
@@ -393,28 +420,6 @@ elif len(tracks) > 0 and index >= len(tracks):
     st.write("---")
     st.success("🎉 You've swiped through all the songs! Pick another vibe to discover more.")
 
-# ----------- LIKED SONGS -----------
-liked = st.session_state["liked_songs"]
-if liked:
-    st.write("---")
-    st.header(f"👍 Liked Songs ({len(liked)})")
-    st.caption("Songs you liked but haven't saved to a playlist yet. Start a new search and they won't appear again.")
-
-    for i, t in enumerate(liked):
-        col_info, col_play, col_remove = st.columns([4, 1, 1])
-        with col_info:
-            deezer_url = t.get("link", f"https://www.deezer.com/track/{t['id']}")
-            st.write(f"**{t['title']}** by {t['artist']['name']}")
-        with col_play:
-            st.markdown(f"[▶]({deezer_url})", unsafe_allow_html=False)
-        with col_remove:
-            if st.button("✕", key=f"unlike_{i}"):
-                st.session_state["liked_songs"].pop(i)
-                st.rerun()
-
-    if st.button("🗑️ Clear liked songs"):
-        st.session_state["liked_songs"] = []
-        st.rerun()
 
 # ----------- PLAYLIST -----------
 st.write("---")
