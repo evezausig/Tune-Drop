@@ -10,7 +10,7 @@ import streamlit as st
 _AUTH_URL  = "https://accounts.spotify.com/authorize"
 _TOKEN_URL = "https://accounts.spotify.com/api/token"
 _API_URL   = "https://api.spotify.com/v1"
-_SCOPE     = "playlist-modify-public playlist-modify-private"
+_SCOPE     = "playlist-modify-public playlist-modify-private user-read-private"
 
 
 def _creds():
@@ -83,15 +83,21 @@ def create_playlist(saved_tracks, token, name="Music-Tok Playlist"):
     Returns (playlist_url, matched_count, total_count).
     """
     # 1. Get the user's Spotify ID
-    me = requests.get(f"{_API_URL}/me", headers=_headers(token)).json()
+    me_resp = requests.get(f"{_API_URL}/me", headers=_headers(token))
+    me = me_resp.json()
+    if "error" in me:
+        raise Exception(f"Spotify API error: {me['error'].get('message', me['error'])} (status {me['error'].get('status', '?')})")
     user_id = me["id"]
 
     # 2. Create an empty playlist
-    playlist = requests.post(
+    pl_resp = requests.post(
         f"{_API_URL}/users/{user_id}/playlists",
         headers=_headers(token),
         json={"name": name, "public": True, "description": "Exported from Music-Tok 🎵"},
-    ).json()
+    )
+    playlist = pl_resp.json()
+    if "error" in playlist:
+        raise Exception(f"Could not create playlist: {playlist['error'].get('message', playlist['error'])}")
     playlist_id  = playlist["id"]
     playlist_url = playlist["external_urls"]["spotify"]
 
