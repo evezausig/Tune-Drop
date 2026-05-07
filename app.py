@@ -276,11 +276,10 @@ if len(saved_playlist) == 0:
     st.write("No songs saved yet. Tap ❤️ on songs you love!")
 else:
     for saved in saved_playlist:
-        deezer_url = saved.get("link", f"https://www.deezer.com/track/{saved['id']}")
-        st.write(f"- **{saved['title']}** by {saved['artist']['name']} — [Open in Deezer]({deezer_url})")
+        st.write(f"- **{saved['title']}** by {saved['artist']['name']}")
 
     st.write("")
-    st.subheader("Export playlist")
+    st.subheader("Export playlist and save songs")
 
     export_col1, export_col2, export_col3 = st.columns(3)
 
