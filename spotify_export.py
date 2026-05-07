@@ -118,15 +118,17 @@ def create_playlist(saved_tracks, token, name="Music-Tok Playlist"):
         if uri:
             uris.append(uri)
 
-    # 4. Add matched tracks (Spotify allows max 100 per request)
+    # 4. Add matched tracks via query param (avoids JSON-body restriction in dev mode)
     for i in range(0, len(uris), 100):
+        batch = uris[i : i + 100]
         add_resp = requests.post(
             f"{_API_URL}/playlists/{playlist_id}/tracks",
-            headers=_headers(token),
-            json={"uris": uris[i : i + 100]},
+            headers={"Authorization": f"Bearer {token}"},
+            params={"uris": ",".join(batch)},
         )
-        add_data = add_resp.json()
-        if "error" in add_data:
-            raise Exception(f"Could not add tracks: {add_data['error'].get('message', add_data['error'])}")
+        if not add_resp.ok:
+            raise Exception(
+                f"Could not add tracks (HTTP {add_resp.status_code}): {add_resp.text[:300]}"
+            )
 
     return playlist_url, len(uris), len(saved_tracks)
