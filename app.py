@@ -8,6 +8,10 @@ from genre_recipes import GENRE_RECIPES
 from metadata_filter import find_matching_songs
 from concurrent.futures import ThreadPoolExecutor
 import spotify_export
+import db
+import auth
+
+db.init_db()
 
 st.title("Music-Tok 🎵")
 st.write("Discover new music, one song at a time")
@@ -41,6 +45,86 @@ if "show_spotify_links" not in st.session_state:
     st.session_state["show_spotify_links"] = False
 if "show_deezer_links" not in st.session_state:
     st.session_state["show_deezer_links"] = False
+if "user" not in st.session_state:
+    st.session_state["user"] = None
+if "renaming_pl_id" not in st.session_state:
+    st.session_state["renaming_pl_id"] = None
+
+# ================================================================
+# SIDEBAR — account / saved playlists
+# ================================================================
+
+with st.sidebar:
+    st.header("👤 My Account")
+
+    if not st.session_state["user"]:
+        tab_login, tab_reg = st.tabs(["Login", "Register"])
+
+        with tab_login:
+            lu = st.text_input("Username", key="li_user")
+            lp = st.text_input("Password", type="password", key="li_pass")
+            if st.button("Login", use_container_width=True, key="li_btn"):
+                user = auth.login(lu, lp)
+                if user:
+                    st.session_state["user"] = user
+                    st.rerun()
+                else:
+                    st.error("Wrong username or password.")
+
+        with tab_reg:
+            ru = st.text_input("Username", key="reg_user")
+            rp = st.text_input("Password", type="password", key="reg_pass")
+            rp2 = st.text_input("Confirm password", type="password", key="reg_pass2")
+            if st.button("Create account", use_container_width=True, key="reg_btn"):
+                if rp != rp2:
+                    st.error("Passwords don't match.")
+                else:
+                    ok, msg = auth.register(ru, rp)
+                    if ok:
+                        st.session_state["user"] = auth.login(ru, rp)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+    else:
+        user = st.session_state["user"]
+        st.write(f"**{user['username']}**")
+
+        if st.button("Logout", use_container_width=True):
+            st.session_state["user"] = None
+            st.session_state["renaming_pl_id"] = None
+            st.rerun()
+
+        st.write("---")
+        st.write("**🎵 My Playlists**")
+
+        playlists = db.get_user_playlists(user["id"])
+
+        if not playlists:
+            st.caption("No saved playlists yet.")
+
+        for pl in playlists:
+            tracks = db.get_playlist_tracks(pl["id"])
+            with st.expander(f"📋 {pl['name']} ({len(tracks)} songs)"):
+                for t in tracks:
+                    st.write(f"- **{t['title']}** by {t['artist']['name']}")
+
+                col_r, col_d = st.columns(2)
+                with col_r:
+                    if st.button("✏️ Rename", key=f"ren_{pl['id']}", use_container_width=True):
+                        st.session_state["renaming_pl_id"] = pl["id"]
+                with col_d:
+                    if st.button("🗑️ Delete", key=f"del_{pl['id']}", use_container_width=True):
+                        db.delete_playlist(pl["id"], user["id"])
+                        st.rerun()
+
+                if st.session_state["renaming_pl_id"] == pl["id"]:
+                    new_name = st.text_input("New name", value=pl["name"], key=f"newname_{pl['id']}")
+                    if st.button("Save", key=f"savename_{pl['id']}", use_container_width=True):
+                        if new_name.strip():
+                            db.rename_playlist(pl["id"], new_name.strip(), user["id"])
+                            st.session_state["renaming_pl_id"] = None
+                            st.rerun()
+
 
 # ================================================================
 # HELPER FUNCTIONS — the "brain" of the app
@@ -277,6 +361,41 @@ if len(saved_playlist) == 0:
 else:
     for saved in saved_playlist:
         st.write(f"- **{saved['title']}** by {saved['artist']['name']}")
+
+    # ── Save to account ───────────────────────────────────────────────────────
+    st.write("")
+    if st.session_state["user"]:
+        st.subheader("💾 Save to my account")
+        user = st.session_state["user"]
+        existing = db.get_user_playlists(user["id"])
+        pl_names = [pl["name"] for pl in existing]
+
+        save_mode = st.radio(
+            "Save to",
+            ["New playlist", "Existing playlist"] if existing else ["New playlist"],
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+
+        if save_mode == "New playlist":
+            new_pl_name = st.text_input("Playlist name", placeholder="e.g. Summer Bangers")
+            if st.button("💾 Save", use_container_width=True):
+                if new_pl_name.strip():
+                    pl_id = db.create_playlist(user["id"], new_pl_name.strip())
+                    db.add_tracks_to_playlist(pl_id, saved_playlist)
+                    st.success(f"✅ Saved to **{new_pl_name}**!")
+                    st.rerun()
+                else:
+                    st.warning("Enter a playlist name first.")
+        else:
+            chosen = st.selectbox("Choose playlist", pl_names)
+            if st.button("💾 Add to playlist", use_container_width=True):
+                pl_id = next(pl["id"] for pl in existing if pl["name"] == chosen)
+                db.add_tracks_to_playlist(pl_id, saved_playlist)
+                st.success(f"✅ Added to **{chosen}**!")
+                st.rerun()
+    else:
+        st.caption("🔒 [Log in](#) to save playlists to your account.")
 
     st.write("")
     st.subheader("Export playlist and save songs")
