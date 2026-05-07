@@ -8,7 +8,6 @@ from genre_recipes import GENRE_RECIPES
 from metadata_filter import find_matching_songs
 from concurrent.futures import ThreadPoolExecutor
 import spotify_export
-import deezer_export
 
 st.title("Music-Tok 🎵")
 st.write("Discover new music, one song at a time")
@@ -24,14 +23,6 @@ if _params.get("state") == "spotify" and "code" in _params:
         st.error(f"Spotify auth failed: {e}")
     st.query_params.clear()
 
-elif _params.get("state") == "deezer" and "code" in _params:
-    try:
-        token_info = deezer_export.exchange_code(_params["code"])
-        st.session_state["deezer_token"] = token_info["access_token"]
-        st.success("✅ Connected to Deezer!")
-    except Exception as e:
-        st.error(f"Deezer auth failed: {e}")
-    st.query_params.clear()
 
 # ----------- SESSION STATE SETUP -----------
 if "tracks" not in st.session_state:
@@ -46,8 +37,6 @@ if "selected_genre" not in st.session_state:
     st.session_state["selected_genre"] = None
 if "spotify_token" not in st.session_state:
     st.session_state["spotify_token"] = None
-if "deezer_token" not in st.session_state:
-    st.session_state["deezer_token"] = None
 if "show_spotify_links" not in st.session_state:
     st.session_state["show_spotify_links"] = False
 
@@ -291,7 +280,7 @@ else:
     st.write("")
     st.subheader("Export playlist")
 
-    export_col1, export_col2, export_col3 = st.columns(3)
+    export_col1, export_col2 = st.columns(2)
 
     # ── CSV download ──────────────────────────────────────────────────────────
     with export_col1:
@@ -316,26 +305,3 @@ else:
             q = f"{t['title']} {t['artist']['name']}".replace(" ", "%20")
             url = f"https://open.spotify.com/search/{q}"
             st.markdown(f"- [{t['title']} — {t['artist']['name']}]({url})")
-
-    # ── Deezer ────────────────────────────────────────────────────────────────
-    with export_col3:
-        if not deezer_export.is_configured():
-            st.button("🎧 Export to Deezer", disabled=True, use_container_width=True,
-                      help="Add DEEZER_APP_ID and DEEZER_SECRET to .streamlit/secrets.toml")
-        elif not st.session_state["deezer_token"]:
-            auth_url = deezer_export.get_auth_url()
-            st.link_button("🎧 Connect Deezer", auth_url, use_container_width=True)
-        else:
-            if st.button("🎧 Export to Deezer", use_container_width=True):
-                with st.spinner("Creating Deezer playlist…"):
-                    try:
-                        url, added, total = deezer_export.create_playlist(
-                            saved_playlist, st.session_state["deezer_token"]
-                        )
-                        st.success(f"✅ {added}/{total} songs added!")
-                        st.link_button("Open playlist on Deezer →", url)
-                    except Exception as e:
-                        st.error(f"Failed: {e}")
-                        st.session_state["deezer_token"] = None
-
-    st.caption("🍎 Apple Music requires a paid Apple Developer account ($99/yr) · 📦 Amazon Music has no public playlist API")
