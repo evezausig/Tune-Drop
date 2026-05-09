@@ -235,7 +235,12 @@ def _fetch_one_deezer_track(song):
     try:
         response = requests.get(search_url, timeout=5)
         results = response.json().get("data", [])
-        return results[0] if results else None
+        if results:
+            track = results[0]
+            # Tag with genre from the Spotify CSV so we can show it on the card
+            track["_genre"] = song.get("track_genre", "")
+            return track
+        return None
     except Exception:
         return None
 
@@ -278,9 +283,12 @@ def build_discovery_queue(query, mode="search"):
     return tracks
 
 
-def start_new_session(query, mode="search"):
+def start_new_session(query, mode="search", vibe_label=None):
     """Resets the queue with new tracks, filtering out already liked/saved songs."""
     tracks = build_discovery_queue(query, mode=mode)
+    for t in tracks:
+        if vibe_label:
+            t["_vibe"] = vibe_label
 
     # Start with songs liked or saved in the current session
     seen_ids = {
@@ -309,12 +317,32 @@ def start_new_session(query, mode="search"):
 # UI — what the user sees
 # ================================================================
 
+# ----------- MOST LOVED THIS WEEK -----------
+top_songs = db.get_top_liked(limit=8)
+if top_songs:
+    with st.expander("🔥 Most Loved This Week", expanded=False):
+        for t, likes in top_songs:
+            year = (t.get("album", {}).get("release_date") or "")[:4]
+            genre_tag = t.get("_genre", "")
+            meta = f"📅 {year}" if year else ""
+            if genre_tag:
+                meta += f"  ·  🎵 {genre_tag.replace('-', ' ').title()}"
+            col_info, col_likes = st.columns([5, 1])
+            with col_info:
+                st.write(f"**{t['title']}** by {t['artist']['name']}")
+                if meta:
+                    st.caption(meta)
+            with col_likes:
+                st.markdown(f"❤️ **{likes}**")
+
+st.write("")
+
 # ----------- SEARCH BAR -----------
 search_query = st.text_input("Search an artist, song, or genre", placeholder="e.g. Taylor Swift, jazz, The Weeknd")
 
 if st.button("Start discovering 🎧"):
     if search_query.strip():
-        start_new_session(search_query, mode="search")
+        start_new_session(search_query, mode="search", vibe_label=search_query)
 
 # ----------- 🆕 NEW: PERSONALIZED EMOTION PICKER -----------
 st.write("**How are you feeling?**")
@@ -345,7 +373,7 @@ if st.session_state["selected_emotion"]:
             if st.button(sub, key=f"sub_{i}", use_container_width=True):
                 with st.spinner(f"Finding songs that feel like '{sub}'..."):
                     recipe = sub_categories[sub]
-                    start_new_session(recipe, mode="recipe")
+                    start_new_session(recipe, mode="recipe", vibe_label=f"{emotion} · {sub}")
                     st.rerun()
 
 # ----------- GENRE PICKER -----------
@@ -377,7 +405,7 @@ if st.session_state["selected_genre"]:
             if st.button(sub, key=f"genre_sub_{i}", use_container_width=True):
                 with st.spinner(f"Finding {sub} tracks..."):
                     recipe = sub_categories[sub]
-                    start_new_session(recipe, mode="recipe")
+                    start_new_session(recipe, mode="recipe", vibe_label=f"{genre} · {sub}")
                     st.rerun()
 
 # ----------- PLAYLIST LIST VIEW -----------
@@ -447,20 +475,38 @@ else:
         st.subheader(current_track["title"])
         st.write(f"by **{current_track['artist']['name']}**")
         st.caption(f"Song {index + 1} of {len(tracks)}")
+
+        # ── Why This Song? ────────────────────────────────────────────────
+        info_parts = []
+        year = (current_track.get("album", {}).get("release_date") or "")[:4]
+        if year:
+            info_parts.append(f"📅 {year}")
+        genre_tag = current_track.get("_genre", "")
+        if genre_tag:
+            info_parts.append(f"🎵 {genre_tag.replace('-', ' ').title()}")
+        vibe_tag = current_track.get("_vibe", "")
+        if vibe_tag:
+            info_parts.append(f"🎭 {vibe_tag}")
+        if info_parts:
+            st.caption(" · ".join(info_parts))
+
         st.audio(current_track["preview"])
 
         col1, col2, col3 = st.columns(3)
         with col1:
             if st.button("👎 Skip"):
+                db.record_interaction(current_track, "skip")
                 st.session_state["current_index"] += 1
                 st.rerun()
         with col2:
             if st.button("👍 Like"):
+                db.record_interaction(current_track, "like")
                 st.session_state["liked_songs"].append(current_track)
                 st.session_state["current_index"] += 1
                 st.rerun()
         with col3:
             if st.button("❤️ Save"):
+                db.record_interaction(current_track, "like")
                 st.session_state["saved_playlist"].append(current_track)
                 st.session_state["current_index"] += 1
                 st.rerun()

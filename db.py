@@ -3,6 +3,7 @@ SQLite database for user accounts and saved playlists.
 """
 import sqlite3
 import json
+from datetime import datetime
 
 DB_PATH = "tune_drop.db"
 
@@ -35,6 +36,23 @@ def init_db():
             track_json  TEXT NOT NULL,
             added_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (playlist_id) REFERENCES playlists(id)
+        );
+        CREATE TABLE IF NOT EXISTS liked_songs (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    INTEGER NOT NULL,
+            track_id   INTEGER NOT NULL,
+            track_json TEXT NOT NULL,
+            added_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            UNIQUE (user_id, track_id)
+        );
+        CREATE TABLE IF NOT EXISTS song_stats (
+            track_id   INTEGER NOT NULL,
+            track_json TEXT NOT NULL,
+            likes      INTEGER DEFAULT 0,
+            skips      INTEGER DEFAULT 0,
+            week       TEXT NOT NULL,
+            PRIMARY KEY (track_id, week)
         );
     """)
     conn.commit()
@@ -129,3 +147,38 @@ def get_playlist_tracks(playlist_id):
     ).fetchall()
     conn.close()
     return [json.loads(r["track_json"]) for r in rows]
+
+
+# ── Anonymous Song Stats ───────────────────────────────────────────────────────
+
+def _current_week():
+    return datetime.now().strftime("%Y-W%W")
+
+
+def record_interaction(track, action):
+    """Record a like or skip anonymously. action: 'like' or 'skip'."""
+    week = _current_week()
+    conn = get_db()
+    conn.execute(
+        "INSERT OR IGNORE INTO song_stats (track_id, track_json, week) VALUES (?, ?, ?)",
+        (track["id"], json.dumps(track), week),
+    )
+    col = "likes" if action == "like" else "skips"
+    conn.execute(
+        f"UPDATE song_stats SET {col} = {col} + 1 WHERE track_id = ? AND week = ?",
+        (track["id"], week),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_top_liked(limit=8):
+    """Returns the most-liked tracks this week as (track_dict, likes) tuples."""
+    week = _current_week()
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT track_json, likes FROM song_stats WHERE week = ? AND likes > 0 ORDER BY likes DESC LIMIT ?",
+        (week, limit),
+    ).fetchall()
+    conn.close()
+    return [(json.loads(r["track_json"]), r["likes"]) for r in rows]

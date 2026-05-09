@@ -64,5 +64,6 @@ def find_matching_songs(recipe, genre_group=None, limit=25):
         results.append({
             "artist": artist,
             "track_name": row["track_name"],
+            "track_genre": str(row.get("track_genre", "")),
         })
     return results
