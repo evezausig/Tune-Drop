@@ -1,21 +1,74 @@
 """
-SQLite database for user accounts and saved playlists.
+Database layer — PostgreSQL (Streamlit Cloud) with SQLite fallback (local dev).
+
+Set DATABASE_URL in .streamlit/secrets.toml to enable PostgreSQL.
+Without it, falls back to a local SQLite file.
 """
-import sqlite3
 import json
+import sqlite3
 from datetime import datetime
 
-DB_PATH = "tune_drop.db"
+# ── Backend detection ─────────────────────────────────────────────────────────
+
+def _db_url():
+    try:
+        import streamlit as st
+        return st.secrets.get("DATABASE_URL") or st.secrets.get("database_url")
+    except Exception:
+        return None
 
 
-def get_db():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+def _use_pg():
+    return bool(_db_url())
+
+
+# ── Connection helpers ────────────────────────────────────────────────────────
+
+SQLITE_PATH = "tune_drop.db"
+
+
+def _pg_conn():
+    import psycopg2
+    import psycopg2.extras
+    conn = psycopg2.connect(_db_url())
+    conn.autocommit = False
+    return conn
+
+
+def _sqlite_conn():
+    conn = sqlite3.connect(SQLITE_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
 
+def get_db():
+    return _pg_conn() if _use_pg() else _sqlite_conn()
+
+
+# ── SQL dialect helpers ───────────────────────────────────────────────────────
+# PostgreSQL uses %s placeholders; SQLite uses ?
+
+def _p(n=1):
+    """Return n positional placeholders for the active backend."""
+    ph = "%s" if _use_pg() else "?"
+    return ", ".join([ph] * n)
+
+
+def _ph():
+    return "%s" if _use_pg() else "?"
+
+
+# ── Schema init ───────────────────────────────────────────────────────────────
+
 def init_db():
-    conn = get_db()
+    if _use_pg():
+        _init_pg()
+    else:
+        _init_sqlite()
+
+
+def _init_sqlite():
+    conn = _sqlite_conn()
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS users (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -59,57 +112,171 @@ def init_db():
     conn.close()
 
 
+def _init_pg():
+    conn = _pg_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id            SERIAL PRIMARY KEY,
+            username      TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS playlists (
+            id         SERIAL PRIMARY KEY,
+            user_id    INTEGER NOT NULL REFERENCES users(id),
+            name       TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS playlist_tracks (
+            id          SERIAL PRIMARY KEY,
+            playlist_id INTEGER NOT NULL REFERENCES playlists(id),
+            track_json  TEXT NOT NULL,
+            added_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS liked_songs (
+            id         SERIAL PRIMARY KEY,
+            user_id    INTEGER NOT NULL REFERENCES users(id),
+            track_id   BIGINT NOT NULL,
+            track_json TEXT NOT NULL,
+            added_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (user_id, track_id)
+        );
+        CREATE TABLE IF NOT EXISTS song_stats (
+            track_id   BIGINT NOT NULL,
+            track_json TEXT NOT NULL,
+            likes      INTEGER DEFAULT 0,
+            skips      INTEGER DEFAULT 0,
+            week       TEXT NOT NULL,
+            PRIMARY KEY (track_id, week)
+        );
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+# ── Generic query helpers ─────────────────────────────────────────────────────
+
+def _fetchone(conn, sql, params=()):
+    cur = conn.cursor()
+    cur.execute(sql, params)
+    row = cur.fetchone()
+    cur.close()
+    if row is None:
+        return None
+    if _use_pg():
+        # psycopg2 returns tuples; wrap in dict using column names
+        cols = [d[0] for d in cur.description] if cur.description else []
+        # cur is closed, description gone — re-run to get cols (already fetched)
+        return row  # handled below via _row_to_dict
+    return dict(row)
+
+
+def _row_to_dict(cur, row):
+    if row is None:
+        return None
+    if _use_pg():
+        cols = [d[0] for d in cur.description]
+        return dict(zip(cols, row))
+    return dict(row)
+
+
+def _fetchall(conn, sql, params=()):
+    cur = conn.cursor()
+    cur.execute(sql, params)
+    rows = cur.fetchall()
+    if _use_pg():
+        cols = [d[0] for d in cur.description]
+        cur.close()
+        return [dict(zip(cols, r)) for r in rows]
+    cur.close()
+    return [dict(r) for r in rows]
+
+
+def _execute(conn, sql, params=()):
+    cur = conn.cursor()
+    cur.execute(sql, params)
+    lastrowid = None
+    if _use_pg():
+        # Use RETURNING id where needed (handled per-function)
+        pass
+    else:
+        lastrowid = cur.lastrowid
+    cur.close()
+    return lastrowid
+
+
 # ── Users ─────────────────────────────────────────────────────────────────────
 
 def create_user(username, password_hash):
     conn = get_db()
     try:
-        conn.execute(
-            "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+        ph = _ph()
+        conn.cursor().execute(
+            f"INSERT INTO users (username, password_hash) VALUES ({ph}, {ph})",
             (username, password_hash),
         )
         conn.commit()
         return True
-    except sqlite3.IntegrityError:
-        return False  # username taken
+    except Exception as e:
+        err = str(e).lower()
+        if "unique" in err or "duplicate" in err:
+            return False
+        raise
     finally:
         conn.close()
 
 
 def get_user(username):
     conn = get_db()
-    row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+    ph = _ph()
+    rows = _fetchall(conn, f"SELECT * FROM users WHERE username = {ph}", (username,))
     conn.close()
-    return dict(row) if row else None
+    return rows[0] if rows else None
 
 
 # ── Playlists ─────────────────────────────────────────────────────────────────
 
 def create_playlist(user_id, name):
     conn = get_db()
-    cursor = conn.execute(
-        "INSERT INTO playlists (user_id, name) VALUES (?, ?)", (user_id, name)
-    )
-    playlist_id = cursor.lastrowid
+    ph = _ph()
+    cur = conn.cursor()
+    if _use_pg():
+        cur.execute(
+            f"INSERT INTO playlists (user_id, name) VALUES ({ph}, {ph}) RETURNING id",
+            (user_id, name),
+        )
+        playlist_id = cur.fetchone()[0]
+    else:
+        cur.execute(
+            f"INSERT INTO playlists (user_id, name) VALUES ({ph}, {ph})",
+            (user_id, name),
+        )
+        playlist_id = cur.lastrowid
     conn.commit()
+    cur.close()
     conn.close()
     return playlist_id
 
 
 def get_user_playlists(user_id):
     conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM playlists WHERE user_id = ? ORDER BY created_at DESC",
+    ph = _ph()
+    rows = _fetchall(
+        conn,
+        f"SELECT * FROM playlists WHERE user_id = {ph} ORDER BY created_at DESC",
         (user_id,),
-    ).fetchall()
+    )
     conn.close()
-    return [dict(r) for r in rows]
+    return rows
 
 
 def rename_playlist(playlist_id, new_name, user_id):
     conn = get_db()
-    conn.execute(
-        "UPDATE playlists SET name = ? WHERE id = ? AND user_id = ?",
+    ph = _ph()
+    conn.cursor().execute(
+        f"UPDATE playlists SET name = {ph} WHERE id = {ph} AND user_id = {ph}",
         (new_name, playlist_id, user_id),
     )
     conn.commit()
@@ -118,11 +285,15 @@ def rename_playlist(playlist_id, new_name, user_id):
 
 def delete_playlist(playlist_id, user_id):
     conn = get_db()
-    conn.execute("DELETE FROM playlist_tracks WHERE playlist_id = ?", (playlist_id,))
-    conn.execute(
-        "DELETE FROM playlists WHERE id = ? AND user_id = ?", (playlist_id, user_id)
+    ph = _ph()
+    cur = conn.cursor()
+    cur.execute(f"DELETE FROM playlist_tracks WHERE playlist_id = {ph}", (playlist_id,))
+    cur.execute(
+        f"DELETE FROM playlists WHERE id = {ph} AND user_id = {ph}",
+        (playlist_id, user_id),
     )
     conn.commit()
+    cur.close()
     conn.close()
 
 
@@ -130,21 +301,26 @@ def delete_playlist(playlist_id, user_id):
 
 def add_tracks_to_playlist(playlist_id, tracks):
     conn = get_db()
+    ph = _ph()
+    cur = conn.cursor()
     for track in tracks:
-        conn.execute(
-            "INSERT INTO playlist_tracks (playlist_id, track_json) VALUES (?, ?)",
+        cur.execute(
+            f"INSERT INTO playlist_tracks (playlist_id, track_json) VALUES ({ph}, {ph})",
             (playlist_id, json.dumps(track)),
         )
     conn.commit()
+    cur.close()
     conn.close()
 
 
 def get_playlist_tracks(playlist_id):
     conn = get_db()
-    rows = conn.execute(
-        "SELECT track_json FROM playlist_tracks WHERE playlist_id = ? ORDER BY added_at",
+    ph = _ph()
+    rows = _fetchall(
+        conn,
+        f"SELECT track_json FROM playlist_tracks WHERE playlist_id = {ph} ORDER BY added_at",
         (playlist_id,),
-    ).fetchall()
+    )
     conn.close()
     return [json.loads(r["track_json"]) for r in rows]
 
@@ -158,27 +334,40 @@ def _current_week():
 def record_interaction(track, action):
     """Record a like or skip anonymously. action: 'like' or 'skip'."""
     week = _current_week()
+    ph = _ph()
     conn = get_db()
-    conn.execute(
-        "INSERT OR IGNORE INTO song_stats (track_id, track_json, week) VALUES (?, ?, ?)",
-        (track["id"], json.dumps(track), week),
-    )
+    cur = conn.cursor()
+    if _use_pg():
+        cur.execute(
+            f"INSERT INTO song_stats (track_id, track_json, week) VALUES ({ph}, {ph}, {ph}) "
+            f"ON CONFLICT (track_id, week) DO NOTHING",
+            (track["id"], json.dumps(track), week),
+        )
+    else:
+        cur.execute(
+            f"INSERT OR IGNORE INTO song_stats (track_id, track_json, week) VALUES ({ph}, {ph}, {ph})",
+            (track["id"], json.dumps(track), week),
+        )
     col = "likes" if action == "like" else "skips"
-    conn.execute(
-        f"UPDATE song_stats SET {col} = {col} + 1 WHERE track_id = ? AND week = ?",
+    cur.execute(
+        f"UPDATE song_stats SET {col} = {col} + 1 WHERE track_id = {ph} AND week = {ph}",
         (track["id"], week),
     )
     conn.commit()
+    cur.close()
     conn.close()
 
 
 def get_top_liked(limit=8):
     """Returns the most-liked tracks this week as (track_dict, likes) tuples."""
     week = _current_week()
+    ph = _ph()
     conn = get_db()
-    rows = conn.execute(
-        "SELECT track_json, likes FROM song_stats WHERE week = ? AND likes > 0 ORDER BY likes DESC LIMIT ?",
+    rows = _fetchall(
+        conn,
+        f"SELECT track_json, likes FROM song_stats WHERE week = {ph} AND likes > 0 "
+        f"ORDER BY likes DESC LIMIT {ph}",
         (week, limit),
-    ).fetchall()
+    )
     conn.close()
     return [(json.loads(r["track_json"]), r["likes"]) for r in rows]
