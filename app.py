@@ -228,6 +228,17 @@ def get_tracks_from_artist_discovery(artist_name):
 
 # 🆕 NEW: This is the magic function. It takes our Kaggle-filtered songs
 # and looks each one up on Deezer to get a playable preview.
+@st.cache_data(ttl=86400)
+def _get_release_year(album_id):
+    """Fetch release year for a Deezer album (cached for 24 h)."""
+    try:
+        resp = requests.get(f"https://api.deezer.com/album/{album_id}", timeout=5)
+        date = resp.json().get("release_date", "")
+        return date[:4] if date else ""
+    except Exception:
+        return ""
+
+
 def _fetch_one_deezer_track(song):
     """Helper: search Deezer for a single song."""
     query = f'{song["track_name"]} {song["artist"]}'
@@ -322,7 +333,8 @@ top_songs = db.get_top_liked(limit=8)
 if top_songs:
     with st.expander("🔥 Most Loved This Week", expanded=False):
         for t, likes in top_songs:
-            year = (t.get("album", {}).get("release_date") or "")[:4]
+            album_id = t.get("album", {}).get("id")
+            year = _get_release_year(album_id) if album_id else ""
             genre_tag = t.get("_genre", "")
             meta = f"📅 {year}" if year else ""
             if genre_tag:
@@ -478,7 +490,8 @@ else:
 
         # ── Why This Song? ────────────────────────────────────────────────
         info_parts = []
-        year = (current_track.get("album", {}).get("release_date") or "")[:4]
+        album_id = current_track.get("album", {}).get("id")
+        year = _get_release_year(album_id) if album_id else ""
         if year:
             info_parts.append(f"📅 {year}")
         genre_tag = current_track.get("_genre", "")
