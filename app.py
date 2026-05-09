@@ -281,11 +281,22 @@ def build_discovery_queue(query, mode="search"):
 def start_new_session(query, mode="search"):
     """Resets the queue with new tracks, filtering out already liked/saved songs."""
     tracks = build_discovery_queue(query, mode=mode)
+
+    # Start with songs liked or saved in the current session
     seen_ids = {
         t["id"] for t in
         st.session_state["liked_songs"] + st.session_state["saved_playlist"]
         if t.get("id")
     }
+
+    # Also exclude songs already saved in any DB playlist for this user
+    user = st.session_state.get("user")
+    if user:
+        for pl in db.get_user_playlists(user["id"]):
+            for t in db.get_playlist_tracks(pl["id"]):
+                if t.get("id"):
+                    seen_ids.add(t["id"])
+
     st.session_state["tracks"] = [t for t in tracks if t.get("id") not in seen_ids]
     st.session_state["current_index"] = 0
     st.session_state["selected_emotion"] = None
