@@ -158,30 +158,6 @@ def _init_pg():
 
 # ── Generic query helpers ─────────────────────────────────────────────────────
 
-def _fetchone(conn, sql, params=()):
-    cur = conn.cursor()
-    cur.execute(sql, params)
-    row = cur.fetchone()
-    cur.close()
-    if row is None:
-        return None
-    if _use_pg():
-        # psycopg2 returns tuples; wrap in dict using column names
-        cols = [d[0] for d in cur.description] if cur.description else []
-        # cur is closed, description gone — re-run to get cols (already fetched)
-        return row  # handled below via _row_to_dict
-    return dict(row)
-
-
-def _row_to_dict(cur, row):
-    if row is None:
-        return None
-    if _use_pg():
-        cols = [d[0] for d in cur.description]
-        return dict(zip(cols, row))
-    return dict(row)
-
-
 def _fetchall(conn, sql, params=()):
     cur = conn.cursor()
     cur.execute(sql, params)
@@ -192,19 +168,6 @@ def _fetchall(conn, sql, params=()):
         return [dict(zip(cols, r)) for r in rows]
     cur.close()
     return [dict(r) for r in rows]
-
-
-def _execute(conn, sql, params=()):
-    cur = conn.cursor()
-    cur.execute(sql, params)
-    lastrowid = None
-    if _use_pg():
-        # Use RETURNING id where needed (handled per-function)
-        pass
-    else:
-        lastrowid = cur.lastrowid
-    cur.close()
-    return lastrowid
 
 
 # ── Users ─────────────────────────────────────────────────────────────────────
