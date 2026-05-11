@@ -53,7 +53,7 @@ def exchange_code(code):
     return resp.json()  # {"access_token": ..., "expires": 0}
 
 
-def create_playlist(saved_tracks, token, name="Music-Tok Playlist"):
+def create_playlist(saved_tracks, token, name="Tune-Drop Playlist"):
     """
     Creates a Deezer playlist from saved_tracks (list of Deezer track dicts).
     Track IDs are already known — no searching needed.

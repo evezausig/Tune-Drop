@@ -85,7 +85,7 @@ def _search_spotify_uri(title, artist, token, isrc=None):
     return None
 
 
-def create_playlist(saved_tracks, token, name="Music-Tok Playlist"):
+def create_playlist(saved_tracks, token, name="Tune-Drop Playlist"):
     """
     Creates a Spotify playlist from saved_tracks (list of Deezer track dicts).
     Returns (playlist_url, matched_count, total_count).
@@ -101,7 +101,7 @@ def create_playlist(saved_tracks, token, name="Music-Tok Playlist"):
     pl_resp = requests.post(
         f"{_API_URL}/me/playlists",
         headers=_headers(token),
-        json={"name": name, "public": False, "description": "Exported from Music-Tok 🎵"},
+        json={"name": name, "public": False, "description": "Exported from Tune-Drop 🎵"},
     )
     playlist = pl_resp.json()
     if "error" in playlist:

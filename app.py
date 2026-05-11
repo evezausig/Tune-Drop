@@ -16,7 +16,7 @@ import auth
 
 db.init_db()
 
-st.title("Music-Tok 🎵")
+st.title("Tune-Drop 🎵")
 st.write("Discover new music, one song at a time")
 
 # ── OAuth callbacks (must run before any UI is rendered) ──────────────────────
@@ -354,7 +354,14 @@ def start_new_session(query, mode="search", vibe_label=None):
                 if t.get("id"):
                     seen_ids.add(t["id"])
 
-    st.session_state["tracks"] = [t for t in tracks if t.get("id") not in seen_ids]
+    filtered = [t for t in tracks if t.get("id") not in seen_ids]
+
+    if not tracks:
+        st.warning("No songs found — try a different search, mood, or genre.")
+    elif not filtered:
+        st.info("You've already heard everything here! Try a different search to find new songs.")
+
+    st.session_state["tracks"] = filtered
     st.session_state["current_index"] = 0
     st.session_state["selected_emotion"] = None
     st.session_state["selected_genre"] = None
