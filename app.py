@@ -1,6 +1,7 @@
 import io
 import csv
 import random
+import collections
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
@@ -49,6 +50,30 @@ _DEFAULTS = {
 for _key, _val in _DEFAULTS.items():
     if _key not in st.session_state:
         st.session_state[_key] = _val
+
+# ── Custom CSS ───────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+/* Tighten audio players */
+audio { width: 100% !important; }
+
+/* Pill-style emotion/genre buttons */
+div.stButton > button {
+    border-radius: 20px;
+}
+
+/* Larger cover art */
+div[data-testid="stImage"] img {
+    border-radius: 12px;
+}
+
+/* Muted caption color */
+div[data-testid="stCaptionContainer"] {
+    opacity: 0.75;
+}
+</style>
+""", unsafe_allow_html=True)
+
 
 def playlist_to_csv(tracks):
     output = io.StringIO()
@@ -174,19 +199,54 @@ with st.sidebar:
                 st.session_state["liked_songs"] = []
                 st.rerun()
 
+        # ── Taste Profile ─────────────────────────────────────────────────────
+        if st.session_state["current_index"] > 0:
+            st.write("---")
+            with st.expander("📊 Your Taste Profile"):
+                total_discovered = len(st.session_state["tracks"]) + st.session_state["current_index"]
+                st.write(f"**Songs discovered this session:** {total_discovered}")
+                st.write(f"**Liked:** {len(st.session_state['liked_songs'])}  |  **Saved:** {len(st.session_state['saved_playlist'])}")
+
+                liked_songs = st.session_state["liked_songs"]
+                genre_counts = collections.Counter(
+                    t.get("_genre", "") for t in liked_songs if t.get("_genre")
+                )
+                if genre_counts:
+                    top_genre = genre_counts.most_common(1)[0][0]
+                    st.write(f"**Top genre:** {top_genre.replace('-', ' ').title()}")
+
+                vibe_counts = collections.Counter(
+                    t.get("_vibe", "") for t in liked_songs if t.get("_vibe")
+                )
+                if vibe_counts:
+                    top_vibe = vibe_counts.most_common(1)[0][0]
+                    st.write(f"**Top vibe:** {top_vibe}")
+
 
 # ── Helper functions ─────────────────────────────────────────────────────────
+
+def _deezer_get(url, **kwargs):
+    """Wraps requests.get with error handling; returns None on failure."""
+    try:
+        return requests.get(url, **kwargs)
+    except Exception:
+        return None
+
 
 def get_tracks_from_playlist(playlist_query):
     """Finds a Deezer playlist matching the query and returns its tracks."""
     url = f"https://api.deezer.com/search/playlist?q={playlist_query}"
-    response = requests.get(url)
+    response = _deezer_get(url)
+    if response is None:
+        return []
     playlists = response.json().get("data", [])
     if not playlists:
         return []
     playlist_id = playlists[0]["id"]
     tracks_url = f"https://api.deezer.com/playlist/{playlist_id}"
-    tracks_response = requests.get(tracks_url)
+    tracks_response = _deezer_get(tracks_url)
+    if tracks_response is None:
+        return []
     playlist_data = tracks_response.json()
     return playlist_data.get("tracks", {}).get("data", [])
 
@@ -194,22 +254,26 @@ def get_tracks_from_playlist(playlist_query):
 def get_tracks_from_artist_discovery(artist_name):
     """Finds an artist + similar artists, returns a mixed list of their top tracks."""
     search_url = f"https://api.deezer.com/search/artist?q={artist_name}"
-    response = requests.get(search_url)
+    response = _deezer_get(search_url)
+    if response is None:
+        return []
     artists = response.json().get("data", [])
     if not artists:
         return []
     main_artist_id = artists[0]["id"]
     all_tracks = []
     top_url = f"https://api.deezer.com/artist/{main_artist_id}/top?limit=5"
-    top_response = requests.get(top_url)
-    all_tracks.extend(top_response.json().get("data", []))
+    top_response = _deezer_get(top_url)
+    if top_response is not None:
+        all_tracks.extend(top_response.json().get("data", []))
     related_url = f"https://api.deezer.com/artist/{main_artist_id}/related"
-    related_response = requests.get(related_url)
-    similar_artists = related_response.json().get("data", [])
+    related_response = _deezer_get(related_url)
+    similar_artists = related_response.json().get("data", []) if related_response is not None else []
     for artist in similar_artists[:8]:
         artist_top_url = f"https://api.deezer.com/artist/{artist['id']}/top?limit=3"
-        artist_top_response = requests.get(artist_top_url)
-        all_tracks.extend(artist_top_response.json().get("data", []))
+        artist_top_response = _deezer_get(artist_top_url)
+        if artist_top_response is not None:
+            all_tracks.extend(artist_top_response.json().get("data", []))
     return all_tracks
 
 
@@ -260,8 +324,8 @@ def build_discovery_queue(query, mode="search"):
         tracks = get_tracks_from_artist_discovery(query)
         if not tracks:
             fallback_url = f"https://api.deezer.com/search?q={query}"
-            fallback_response = requests.get(fallback_url)
-            tracks = fallback_response.json().get("data", [])
+            fallback_response = _deezer_get(fallback_url)
+            tracks = fallback_response.json().get("data", []) if fallback_response is not None else []
 
     tracks = [t for t in tracks if t.get("preview")]
     random.shuffle(tracks)
@@ -294,6 +358,17 @@ def start_new_session(query, mode="search", vibe_label=None):
     st.session_state["current_index"] = 0
     st.session_state["selected_emotion"] = None
     st.session_state["selected_genre"] = None
+
+
+def get_recommended_recipe(liked_songs):
+    """Builds a recipe dict from the top genres in liked songs."""
+    genre_counts = collections.Counter(
+        t.get("_genre", "") for t in liked_songs if t.get("_genre")
+    )
+    if not genre_counts:
+        return None
+    top_genres = [g for g, _ in genre_counts.most_common(5)]
+    return {"track_genre": top_genres}
 
 
 # ── UI ───────────────────────────────────────────────────────────────────────
@@ -409,6 +484,18 @@ if st.session_state["open_playlist_tracks"] is not None:
     if is_liked_view and not pl_tracks:
         st.caption("No liked songs. Tap 👍 while discovering to add some.")
 
+    if is_liked_view and pl_tracks:
+        if st.button("🎯 Recommended for you", use_container_width=True, key="liked_view_reco"):
+            recipe = get_recommended_recipe(pl_tracks)
+            if recipe:
+                st.session_state["open_playlist_tracks"] = None
+                st.session_state["open_playlist_name"] = None
+                st.session_state["open_playlist_is_liked"] = False
+                start_new_session(recipe, mode="recipe", vibe_label="🎯 Based on your taste")
+                st.rerun()
+            else:
+                st.info("No genre data available yet — like more songs to get recommendations.")
+
     for i, t in enumerate(pl_tracks):
         st.write(f"**{t['title']}** by {t['artist']['name']}")
         if t.get("preview"):
@@ -456,6 +543,8 @@ else:
         st.image(current_track["album"]["cover_big"])
         st.subheader(current_track["title"])
         st.write(f"by **{current_track['artist']['name']}**")
+        progress = (index + 1) / len(tracks)
+        st.progress(progress)
         st.caption(f"Song {index + 1} of {len(tracks)}")
 
         # ── Why This Song? ────────────────────────────────────────────────
@@ -489,14 +578,28 @@ else:
                 st.rerun()
         with col3:
             if st.button("❤️ Save"):
-                db.record_interaction(current_track, "like")
-                st.session_state["saved_playlist"].append(current_track)
+                saved_ids = {t["id"] for t in st.session_state["saved_playlist"] if t.get("id")}
+                if current_track.get("id") in saved_ids:
+                    st.toast("Already in your playlist!")
+                else:
+                    db.record_interaction(current_track, "like")
+                    st.session_state["saved_playlist"].append(current_track)
                 st.session_state["current_index"] += 1
                 st.rerun()
 
     elif tracks and index >= len(tracks):
         st.write("---")
         st.success("🎉 You've swiped through all the songs! Pick another vibe to discover more.")
+        if st.button("🎯 Discover more like your liked songs", use_container_width=True):
+            recipe = get_recommended_recipe(st.session_state["liked_songs"])
+            if recipe:
+                start_new_session(recipe, mode="recipe", vibe_label="🎯 Based on your taste")
+                st.rerun()
+            else:
+                st.info("Like some songs first to get personalised recommendations.")
+
+    elif not tracks and index == 0:
+        st.info("👆 Search for an artist, pick a mood above, or explore a genre to start discovering music.")
 
 
 # ── Current session playlist ─────────────────────────────────────────────────
