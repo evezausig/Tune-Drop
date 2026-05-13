@@ -730,7 +730,9 @@ else:
     if tracks and index < len(tracks):
         current_track = tracks[index]
         st.write("---")
-        st.image(current_track["album"]["cover_big"])
+        cover = current_track.get("album", {}).get("cover_big") or current_track.get("album", {}).get("cover_medium") or current_track.get("album", {}).get("cover")
+        if cover:
+            st.image(cover)
         st.subheader(current_track["title"])
         st.write(f"by **{current_track['artist']['name']}**")
         progress = (index + 1) / len(tracks)
