@@ -121,6 +121,16 @@ def _init_sqlite():
             day_of_week  INTEGER NOT NULL,
             logged_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE TABLE IF NOT EXISTS friendships (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            requester_id INTEGER NOT NULL,
+            addressee_id INTEGER NOT NULL,
+            status       TEXT NOT NULL DEFAULT 'pending',
+            created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (requester_id) REFERENCES users(id),
+            FOREIGN KEY (addressee_id) REFERENCES users(id),
+            UNIQUE (requester_id, addressee_id)
+        );
     """)
     conn.commit()
     conn.close()
@@ -189,6 +199,16 @@ def _init_pg():
             mood_label  TEXT NOT NULL,
             day_of_week INTEGER NOT NULL,
             logged_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS friendships (
+            id           SERIAL PRIMARY KEY,
+            requester_id INTEGER NOT NULL REFERENCES users(id),
+            addressee_id INTEGER NOT NULL REFERENCES users(id),
+            status       TEXT NOT NULL DEFAULT 'pending',
+            created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (requester_id, addressee_id)
         )
     """)
     conn.commit()
@@ -433,3 +453,221 @@ def get_mood_stats(user_id):
     )
     conn.close()
     return {r["mood_label"]: r["cnt"] for r in rows}
+
+
+# ── Liked songs (persistent) ─────────────────────────────────────────────────
+
+def save_liked_song(user_id, track):
+    """Persist a liked song to the database for the given user (ignore duplicates)."""
+    conn = get_db()
+    ph = _ph()
+    cur = conn.cursor()
+    try:
+        if _use_pg():
+            cur.execute(
+                f"INSERT INTO liked_songs (user_id, track_id, track_json) VALUES ({ph}, {ph}, {ph}) ON CONFLICT (user_id, track_id) DO NOTHING",
+                (user_id, track["id"], json.dumps(track)),
+            )
+        else:
+            cur.execute(
+                f"INSERT OR IGNORE INTO liked_songs (user_id, track_id, track_json) VALUES ({ph}, {ph}, {ph})",
+                (user_id, track["id"], json.dumps(track)),
+            )
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_liked_songs_from_db(user_id):
+    """Return all liked songs for a user from the database, newest first."""
+    conn = get_db()
+    ph = _ph()
+    rows = _fetchall(
+        conn,
+        f"SELECT track_json FROM liked_songs WHERE user_id = {ph} ORDER BY added_at DESC",
+        (user_id,),
+    )
+    conn.close()
+    return [json.loads(r["track_json"]) for r in rows]
+
+
+def remove_liked_song(user_id, track_id):
+    """Remove a liked song from the database."""
+    conn = get_db()
+    ph = _ph()
+    cur = conn.cursor()
+    cur.execute(
+        f"DELETE FROM liked_songs WHERE user_id = {ph} AND track_id = {ph}",
+        (user_id, track_id),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+# ── Friends ───────────────────────────────────────────────────────────────────
+
+def send_friend_request(from_user_id, to_username):
+    """
+    Send a friend request from from_user_id to the user with to_username.
+    Returns 'sent', 'not_found', 'self', or 'already'.
+    """
+    conn = get_db()
+    ph = _ph()
+    # Look up target user
+    rows = _fetchall(conn, f"SELECT id FROM users WHERE username = {ph}", (to_username,))
+    if not rows:
+        conn.close()
+        return "not_found"
+    to_user_id = rows[0]["id"]
+    if to_user_id == from_user_id:
+        conn.close()
+        return "self"
+    # Check if friendship already exists in either direction
+    existing = _fetchall(
+        conn,
+        f"SELECT id FROM friendships WHERE (requester_id = {ph} AND addressee_id = {ph}) OR (requester_id = {ph} AND addressee_id = {ph})",
+        (from_user_id, to_user_id, to_user_id, from_user_id),
+    )
+    if existing:
+        conn.close()
+        return "already"
+    cur = conn.cursor()
+    cur.execute(
+        f"INSERT INTO friendships (requester_id, addressee_id, status) VALUES ({ph}, {ph}, 'pending')",
+        (from_user_id, to_user_id),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+    return "sent"
+
+
+def get_pending_requests(user_id):
+    """Return list of {id, username, requester_id} for requests sent TO user_id."""
+    conn = get_db()
+    ph = _ph()
+    rows = _fetchall(
+        conn,
+        f"""SELECT f.id, u.username, u.id as requester_id
+            FROM friendships f
+            JOIN users u ON u.id = f.requester_id
+            WHERE f.addressee_id = {ph} AND f.status = 'pending'
+            ORDER BY f.created_at DESC""",
+        (user_id,),
+    )
+    conn.close()
+    return rows
+
+
+def accept_friend_request(user_id, requester_id):
+    """Accept a pending friend request."""
+    conn = get_db()
+    ph = _ph()
+    cur = conn.cursor()
+    cur.execute(
+        f"UPDATE friendships SET status = 'accepted' WHERE requester_id = {ph} AND addressee_id = {ph}",
+        (requester_id, user_id),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def decline_friend_request(user_id, requester_id):
+    """Decline (delete) a pending friend request."""
+    conn = get_db()
+    ph = _ph()
+    cur = conn.cursor()
+    cur.execute(
+        f"DELETE FROM friendships WHERE requester_id = {ph} AND addressee_id = {ph}",
+        (requester_id, user_id),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def remove_friend(user_id, friend_id):
+    """Remove an accepted friendship (either direction)."""
+    conn = get_db()
+    ph = _ph()
+    cur = conn.cursor()
+    cur.execute(
+        f"DELETE FROM friendships WHERE (requester_id = {ph} AND addressee_id = {ph}) OR (requester_id = {ph} AND addressee_id = {ph})",
+        (user_id, friend_id, friend_id, user_id),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def get_friends(user_id):
+    """Return list of {id, username} for all accepted friends of user_id."""
+    conn = get_db()
+    ph = _ph()
+    rows = _fetchall(
+        conn,
+        f"""SELECT u.id, u.username
+            FROM friendships f
+            JOIN users u ON u.id = f.addressee_id
+            WHERE f.requester_id = {ph} AND f.status = 'accepted'
+            UNION
+            SELECT u.id, u.username
+            FROM friendships f
+            JOIN users u ON u.id = f.requester_id
+            WHERE f.addressee_id = {ph} AND f.status = 'accepted'
+            ORDER BY username""",
+        (user_id, user_id),
+    )
+    conn.close()
+    return rows
+
+
+def get_friends_liked_songs(user_id, limit=20):
+    """Return list of {username, track_json, added_at} for all friends' liked songs."""
+    friends = get_friends(user_id)
+    if not friends:
+        return []
+    friend_ids = [f["id"] for f in friends]
+    conn = get_db()
+    ph = _ph()
+    placeholders = ", ".join([ph] * len(friend_ids))
+    rows = _fetchall(
+        conn,
+        f"""SELECT u.username, ls.track_json, ls.added_at
+            FROM liked_songs ls
+            JOIN users u ON u.id = ls.user_id
+            WHERE ls.user_id IN ({placeholders})
+            ORDER BY ls.added_at DESC
+            LIMIT {ph}""",
+        tuple(friend_ids) + (limit,),
+    )
+    conn.close()
+    return [(r["username"], json.loads(r["track_json"])) for r in rows]
+
+
+def get_friends_playlists(user_id):
+    """Return list of {username, playlist_id, name, track_count} for all friends' playlists."""
+    friends = get_friends(user_id)
+    if not friends:
+        return []
+    friend_ids = [f["id"] for f in friends]
+    conn = get_db()
+    ph = _ph()
+    placeholders = ", ".join([ph] * len(friend_ids))
+    rows = _fetchall(
+        conn,
+        f"""SELECT u.username, p.id as playlist_id, p.name,
+                   COUNT(pt.id) as track_count
+            FROM playlists p
+            JOIN users u ON u.id = p.user_id
+            LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
+            WHERE p.user_id IN ({placeholders})
+            GROUP BY u.username, p.id, p.name
+            ORDER BY p.created_at DESC""",
+        tuple(friend_ids),
+    )
+    conn.close()
+    return rows

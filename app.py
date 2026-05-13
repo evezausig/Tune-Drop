@@ -46,6 +46,8 @@ _DEFAULTS = {
     "open_playlist_tracks": None,
     "open_playlist_name": None,
     "open_playlist_is_liked": False,
+    "open_friends_view": False,
+    "open_friend_playlist": None,   # (username, playlist_id, name)
 }
 for _key, _val in _DEFAULTS.items():
     if _key not in st.session_state:
@@ -107,6 +109,8 @@ with st.sidebar:
                 user = auth.login(lu, lp)
                 if user:
                     st.session_state["user"] = user
+                    # Restore liked songs from DB
+                    st.session_state["liked_songs"] = db.get_liked_songs_from_db(user["id"])
                     st.rerun()
                 else:
                     st.error("Wrong username or password.")
@@ -121,7 +125,10 @@ with st.sidebar:
                 else:
                     ok, msg = auth.register(ru, rp)
                     if ok:
-                        st.session_state["user"] = auth.login(ru, rp)
+                        logged_in = auth.login(ru, rp)
+                        st.session_state["user"] = logged_in
+                        if logged_in:
+                            st.session_state["liked_songs"] = db.get_liked_songs_from_db(logged_in["id"])
                         st.rerun()
                     else:
                         st.error(msg)
@@ -227,6 +234,60 @@ with st.sidebar:
                     st.write("**🎭 Your top moods:**")
                     for mood, count in mood_stats.items():
                         st.caption(f"{mood} — {count}x")
+
+        # ── Friends ───────────────────────────────────────────────────────────
+        st.write("---")
+        with st.expander("👫 Friends", expanded=False):
+            # Add a friend
+            st.write("**Add a friend**")
+            add_username = st.text_input("Friend's username", key="add_friend_input", placeholder="e.g. alice")
+            if st.button("Send request", key="send_friend_btn", use_container_width=True):
+                if add_username.strip():
+                    result = db.send_friend_request(user["id"], add_username.strip())
+                    if result == "sent":
+                        st.success(f"Friend request sent to **{add_username.strip()}**!")
+                    elif result == "not_found":
+                        st.error("User not found.")
+                    elif result == "self":
+                        st.error("You can't add yourself.")
+                    elif result == "already":
+                        st.info("Friend request already sent or you're already friends.")
+
+            # Pending requests
+            pending = db.get_pending_requests(user["id"])
+            if pending:
+                st.write("**Pending requests**")
+                for req in pending:
+                    st.write(f"🙋 **{req['username']}** wants to be your friend")
+                    col_a, col_d = st.columns(2)
+                    with col_a:
+                        if st.button("✅ Accept", key=f"acc_{req['id']}", use_container_width=True):
+                            db.accept_friend_request(user["id"], req["requester_id"])
+                            st.rerun()
+                    with col_d:
+                        if st.button("❌ Decline", key=f"dec_{req['id']}", use_container_width=True):
+                            db.decline_friend_request(user["id"], req["requester_id"])
+                            st.rerun()
+
+            # Friends list
+            friends = db.get_friends(user["id"])
+            if friends:
+                st.write("**Your friends**")
+                for f in friends:
+                    col_name, col_btn = st.columns([3, 1])
+                    with col_name:
+                        st.write(f"👤 {f['username']}")
+                    with col_btn:
+                        if st.button("✕", key=f"unfriend_{f['id']}", help="Remove friend"):
+                            db.remove_friend(user["id"], f["id"])
+                            st.rerun()
+                st.write("")
+                if st.button("👥 See what friends liked", use_container_width=True, key="open_friends_feed"):
+                    st.session_state["open_friends_view"] = True
+                    st.session_state["open_playlist_tracks"] = None
+                    st.rerun()
+            elif not pending:
+                st.caption("No friends yet. Add someone by username above.")
 
 
 # ── Helper functions ─────────────────────────────────────────────────────────
@@ -515,8 +576,75 @@ if st.session_state["selected_genre"]:
                     start_new_session(recipe, mode="recipe", vibe_label=f"{genre} · {sub}")
                     st.rerun()
 
+# ── Friends feed & playlists view ───────────────────────────────────────────
+if st.session_state.get("open_friends_view") and st.session_state.get("user"):
+    _fuser = st.session_state["user"]
+    st.write("---")
+    col_fhead, col_fclose = st.columns([5, 1])
+    with col_fhead:
+        st.subheader("👫 Friends Activity")
+    with col_fclose:
+        if st.button("✕ Close", key="close_friends_view", use_container_width=True):
+            st.session_state["open_friends_view"] = False
+            st.session_state["open_friend_playlist"] = None
+            st.rerun()
+
+    friends = db.get_friends(_fuser["id"])
+    if not friends:
+        st.info("You don't have any friends yet. Add friends from the sidebar!")
+    else:
+        # ── Friend playlist viewer ────────────────────────────────────────────
+        if st.session_state.get("open_friend_playlist"):
+            fp_username, fp_pl_id, fp_pl_name = st.session_state["open_friend_playlist"]
+            fp_tracks = db.get_playlist_tracks(fp_pl_id)
+            st.subheader(f"📋 {fp_pl_name} — by {fp_username}")
+            if st.button("← Back to friends", key="back_from_friend_pl"):
+                st.session_state["open_friend_playlist"] = None
+                st.rerun()
+            if not fp_tracks:
+                st.caption("This playlist is empty.")
+            for t in fp_tracks:
+                st.write(f"**{t['title']}** by {t['artist']['name']}")
+                if t.get("preview"):
+                    st.audio(t["preview"], format="audio/mp3")
+                st.write("")
+        else:
+            # ── Friends' liked songs ──────────────────────────────────────────
+            st.write("**❤️ What your friends have liked recently**")
+            friends_liked = db.get_friends_liked_songs(_fuser["id"], limit=20)
+            if not friends_liked:
+                st.caption("Your friends haven't liked any songs yet.")
+            else:
+                for _fusername, _ft in friends_liked:
+                    col_fi, col_fa = st.columns([5, 2])
+                    with col_fi:
+                        st.write(f"**{_fusername}** liked **{_ft['title']}** by {_ft['artist']['name']}")
+                    with col_fa:
+                        if _ft.get("preview"):
+                            st.audio(_ft["preview"], format="audio/mp3")
+                    st.write("")
+
+            # ── Friends' playlists ────────────────────────────────────────────
+            st.write("---")
+            st.write("**🎵 Your friends' playlists**")
+            friends_pls = db.get_friends_playlists(_fuser["id"])
+            if not friends_pls:
+                st.caption("Your friends haven't created any playlists yet.")
+            else:
+                for fp in friends_pls:
+                    col_fpl, col_fop = st.columns([4, 1])
+                    with col_fpl:
+                        st.write(f"📋 **{fp['name']}** by {fp['username']} · {fp['track_count']} songs")
+                    with col_fop:
+                        if fp["track_count"] > 0:
+                            if st.button("▶️ Open", key=f"open_fpl_{fp['playlist_id']}", use_container_width=True):
+                                st.session_state["open_friend_playlist"] = (
+                                    fp["username"], fp["playlist_id"], fp["name"]
+                                )
+                                st.rerun()
+
 # ── Playlist list view ───────────────────────────────────────────────────────
-if st.session_state["open_playlist_tracks"] is not None:
+elif st.session_state["open_playlist_tracks"] is not None:
     is_liked_view = st.session_state["open_playlist_is_liked"]
     pl_tracks = st.session_state["liked_songs"] if is_liked_view else st.session_state["open_playlist_tracks"]
     pl_name = st.session_state["open_playlist_name"] or "Playlist"
@@ -544,7 +672,17 @@ if st.session_state["open_playlist_tracks"] is not None:
                 start_new_session(recipe, mode="recipe", vibe_label="🎯 Based on your taste")
                 st.rerun()
             else:
-                st.info("No genre data available yet — like more songs to get recommendations.")
+                # Fall back: use artist names from liked songs to build a discovery queue
+                artists = list({t["artist"]["name"] for t in pl_tracks if t.get("artist", {}).get("name")})
+                if artists:
+                    pick = random.choice(artists)
+                    st.session_state["open_playlist_tracks"] = None
+                    st.session_state["open_playlist_name"] = None
+                    st.session_state["open_playlist_is_liked"] = False
+                    start_new_session(pick, mode="search", vibe_label=f"🎯 Similar to {pick}")
+                    st.rerun()
+                else:
+                    st.info("Like some songs first to get personalised recommendations.")
 
     for i, t in enumerate(pl_tracks):
         st.write(f"**{t['title']}** by {t['artist']['name']}")
@@ -558,7 +696,9 @@ if st.session_state["open_playlist_tracks"] is not None:
                     st.rerun()
             with btn_col2:
                 if st.button("👎 Unlike", key=f"liked_remove_{i}", use_container_width=True):
-                    st.session_state["liked_songs"].pop(i)
+                    removed = st.session_state["liked_songs"].pop(i)
+                    if st.session_state.get("user") and removed.get("id"):
+                        db.remove_liked_song(st.session_state["user"]["id"], removed["id"])
                     st.rerun()
         st.write("")
 
@@ -625,6 +765,7 @@ else:
                 db.record_interaction(current_track, "like")
                 if st.session_state.get("user"):
                     db.record_social_like(st.session_state["user"]["username"], current_track)
+                    db.save_liked_song(st.session_state["user"]["id"], current_track)
                 st.session_state["liked_songs"].append(current_track)
                 st.session_state["current_index"] += 1
                 st.rerun()
@@ -637,6 +778,7 @@ else:
                     db.record_interaction(current_track, "like")
                     if st.session_state.get("user"):
                         db.record_social_like(st.session_state["user"]["username"], current_track)
+                        db.save_liked_song(st.session_state["user"]["id"], current_track)
                     st.session_state["saved_playlist"].append(current_track)
                 st.session_state["current_index"] += 1
                 st.rerun()
@@ -645,9 +787,14 @@ else:
         st.write("---")
         st.success("🎉 You've swiped through all the songs! Pick another vibe to discover more.")
         if st.button("🎯 Discover more like your liked songs", use_container_width=True):
-            recipe = get_recommended_recipe(st.session_state["liked_songs"])
+            liked = st.session_state["liked_songs"]
+            recipe = get_recommended_recipe(liked)
             if recipe:
                 start_new_session(recipe, mode="recipe", vibe_label="🎯 Based on your taste")
+                st.rerun()
+            elif liked:
+                pick = random.choice(liked)["artist"]["name"]
+                start_new_session(pick, mode="search", vibe_label=f"🎯 Similar to {pick}")
                 st.rerun()
             else:
                 st.info("Like some songs first to get personalised recommendations.")
