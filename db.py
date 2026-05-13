@@ -135,19 +135,25 @@ def _init_pg():
             username      TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
             created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
+        )
+    """)
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS playlists (
             id         SERIAL PRIMARY KEY,
             user_id    INTEGER NOT NULL REFERENCES users(id),
             name       TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
+        )
+    """)
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS playlist_tracks (
             id          SERIAL PRIMARY KEY,
             playlist_id INTEGER NOT NULL REFERENCES playlists(id),
             track_json  TEXT NOT NULL,
             added_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
+        )
+    """)
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS liked_songs (
             id         SERIAL PRIMARY KEY,
             user_id    INTEGER NOT NULL REFERENCES users(id),
@@ -155,7 +161,9 @@ def _init_pg():
             track_json TEXT NOT NULL,
             added_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE (user_id, track_id)
-        );
+        )
+    """)
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS song_stats (
             track_id   BIGINT NOT NULL,
             track_json TEXT NOT NULL,
@@ -163,21 +171,25 @@ def _init_pg():
             skips      INTEGER DEFAULT 0,
             week       TEXT NOT NULL,
             PRIMARY KEY (track_id, week)
-        );
+        )
+    """)
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS social_feed (
             id         SERIAL PRIMARY KEY,
             username   TEXT NOT NULL,
             track_id   BIGINT NOT NULL,
             track_json TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
+        )
+    """)
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS mood_log (
-            id           SERIAL PRIMARY KEY,
-            user_id      INTEGER NOT NULL,
-            mood_label   TEXT NOT NULL,
-            day_of_week  INTEGER NOT NULL,
-            logged_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
+            id          SERIAL PRIMARY KEY,
+            user_id     INTEGER NOT NULL,
+            mood_label  TEXT NOT NULL,
+            day_of_week INTEGER NOT NULL,
+            logged_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
     """)
     conn.commit()
     cur.close()
