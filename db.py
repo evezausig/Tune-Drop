@@ -107,6 +107,20 @@ def _init_sqlite():
             week       TEXT NOT NULL,
             PRIMARY KEY (track_id, week)
         );
+        CREATE TABLE IF NOT EXISTS social_feed (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            username   TEXT NOT NULL,
+            track_id   INTEGER NOT NULL,
+            track_json TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS mood_log (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      INTEGER NOT NULL,
+            mood_label   TEXT NOT NULL,
+            day_of_week  INTEGER NOT NULL,
+            logged_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
     """)
     conn.commit()
     conn.close()
@@ -150,6 +164,20 @@ def _init_pg():
             week       TEXT NOT NULL,
             PRIMARY KEY (track_id, week)
         );
+        CREATE TABLE IF NOT EXISTS social_feed (
+            id         SERIAL PRIMARY KEY,
+            username   TEXT NOT NULL,
+            track_id   BIGINT NOT NULL,
+            track_json TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS mood_log (
+            id           SERIAL PRIMARY KEY,
+            user_id      INTEGER NOT NULL,
+            mood_label   TEXT NOT NULL,
+            day_of_week  INTEGER NOT NULL,
+            logged_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
     """)
     conn.commit()
     cur.close()
@@ -176,11 +204,13 @@ def create_user(username, password_hash):
     conn = get_db()
     try:
         ph = _ph()
-        conn.cursor().execute(
+        cur = conn.cursor()
+        cur.execute(
             f"INSERT INTO users (username, password_hash) VALUES ({ph}, {ph})",
             (username, password_hash),
         )
         conn.commit()
+        cur.close()
         return True
     except Exception as e:
         err = str(e).lower()
@@ -238,11 +268,13 @@ def get_user_playlists(user_id):
 def rename_playlist(playlist_id, new_name, user_id):
     conn = get_db()
     ph = _ph()
-    conn.cursor().execute(
+    cur = conn.cursor()
+    cur.execute(
         f"UPDATE playlists SET name = {ph} WHERE id = {ph} AND user_id = {ph}",
         (new_name, playlist_id, user_id),
     )
     conn.commit()
+    cur.close()
     conn.close()
 
 
@@ -334,3 +366,58 @@ def get_top_liked(limit=8):
     )
     conn.close()
     return [(json.loads(r["track_json"]), r["likes"]) for r in rows]
+
+
+def record_social_like(username, track):
+    """Record a named like for the social feed."""
+    conn = get_db()
+    ph = _ph()
+    cur = conn.cursor()
+    cur.execute(
+        f"INSERT INTO social_feed (username, track_id, track_json) VALUES ({ph}, {ph}, {ph})",
+        (username, track["id"], json.dumps(track)),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def get_social_feed(limit=10):
+    """Return the most recent named likes across all users."""
+    conn = get_db()
+    ph = _ph()
+    rows = _fetchall(
+        conn,
+        f"SELECT username, track_json, created_at FROM social_feed ORDER BY created_at DESC LIMIT {ph}",
+        (limit,),
+    )
+    conn.close()
+    return [(r["username"], json.loads(r["track_json"])) for r in rows]
+
+
+def record_mood(user_id, mood_label):
+    """Log a mood/genre selection for a user."""
+    day = datetime.now().weekday()  # 0=Monday, 6=Sunday
+    conn = get_db()
+    ph = _ph()
+    cur = conn.cursor()
+    cur.execute(
+        f"INSERT INTO mood_log (user_id, mood_label, day_of_week) VALUES ({ph}, {ph}, {ph})",
+        (user_id, mood_label, day),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def get_mood_stats(user_id):
+    """Return a dict of {mood_label: count} for this user's top moods."""
+    conn = get_db()
+    ph = _ph()
+    rows = _fetchall(
+        conn,
+        f"SELECT mood_label, COUNT(*) as cnt FROM mood_log WHERE user_id = {ph} GROUP BY mood_label ORDER BY cnt DESC LIMIT 5",
+        (user_id,),
+    )
+    conn.close()
+    return {r["mood_label"]: r["cnt"] for r in rows}

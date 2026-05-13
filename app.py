@@ -222,6 +222,12 @@ with st.sidebar:
                     top_vibe = vibe_counts.most_common(1)[0][0]
                     st.write(f"**Top vibe:** {top_vibe}")
 
+                mood_stats = db.get_mood_stats(user["id"])
+                if mood_stats:
+                    st.write("**🎭 Your top moods:**")
+                    for mood, count in mood_stats.items():
+                        st.caption(f"{mood} — {count}x")
+
 
 # ── Helper functions ─────────────────────────────────────────────────────────
 
@@ -314,6 +320,17 @@ def get_tracks_from_recipe(recipe):
     return [t for t in results if t is not None]
 
 
+def _limit_per_artist(tracks, max_per_artist=3):
+    counts = {}
+    result = []
+    for t in tracks:
+        artist = t.get("artist", {}).get("name", "")
+        if counts.get(artist, 0) < max_per_artist:
+            result.append(t)
+            counts[artist] = counts.get(artist, 0) + 1
+    return result
+
+
 def build_discovery_queue(query, mode="search"):
     """Decides which strategy to use and returns a shuffled list of tracks."""
     if mode == "vibe":
@@ -328,6 +345,21 @@ def build_discovery_queue(query, mode="search"):
             tracks = fallback_response.json().get("data", []) if fallback_response is not None else []
 
     tracks = [t for t in tracks if t.get("preview")]
+
+    # Deduplicate by track ID
+    seen_ids = set()
+    deduped = []
+    for t in tracks:
+        tid = t.get("id")
+        if tid not in seen_ids:
+            deduped.append(t)
+            if tid:
+                seen_ids.add(tid)
+    tracks = deduped
+
+    # Max 3 songs per artist
+    tracks = _limit_per_artist(tracks)
+
     random.shuffle(tracks)
     return tracks
 
@@ -379,6 +411,13 @@ def get_recommended_recipe(liked_songs):
 
 
 # ── UI ───────────────────────────────────────────────────────────────────────
+
+# ── Social Feed ──────────────────────────────────────────────────────────────
+social = db.get_social_feed(limit=8)
+if social:
+    with st.expander("👥 What people are listening to", expanded=False):
+        for username, t in social:
+            st.write(f"**{username}** liked **{t['title']}** by {t['artist']['name']}")
 
 # ── Most Loved This Week ──────────────────────────────────────────────────────
 top_songs = db.get_top_liked(limit=8)
@@ -437,6 +476,8 @@ if st.session_state["selected_emotion"]:
             if st.button(sub, key=f"sub_{i}", use_container_width=True):
                 with st.spinner(f"Finding songs that feel like '{sub}'..."):
                     recipe = sub_categories[sub]
+                    if st.session_state.get("user"):
+                        db.record_mood(st.session_state["user"]["id"], f"{emotion} · {sub}")
                     start_new_session(recipe, mode="recipe", vibe_label=f"{emotion} · {sub}")
                     st.rerun()
 
@@ -469,6 +510,8 @@ if st.session_state["selected_genre"]:
             if st.button(sub, key=f"genre_sub_{i}", use_container_width=True):
                 with st.spinner(f"Finding {sub} tracks..."):
                     recipe = sub_categories[sub]
+                    if st.session_state.get("user"):
+                        db.record_mood(st.session_state["user"]["id"], f"{genre} · {sub}")
                     start_new_session(recipe, mode="recipe", vibe_label=f"{genre} · {sub}")
                     st.rerun()
 
@@ -580,6 +623,8 @@ else:
         with col2:
             if st.button("👍 Like"):
                 db.record_interaction(current_track, "like")
+                if st.session_state.get("user"):
+                    db.record_social_like(st.session_state["user"]["username"], current_track)
                 st.session_state["liked_songs"].append(current_track)
                 st.session_state["current_index"] += 1
                 st.rerun()
@@ -590,6 +635,8 @@ else:
                     st.toast("Already in your playlist!")
                 else:
                     db.record_interaction(current_track, "like")
+                    if st.session_state.get("user"):
+                        db.record_social_like(st.session_state["user"]["username"], current_track)
                     st.session_state["saved_playlist"].append(current_track)
                 st.session_state["current_index"] += 1
                 st.rerun()
