@@ -54,6 +54,8 @@ _DEFAULTS = {
     "open_playlist_is_liked": False,
     "open_friends_view": False,
     "open_friend_playlist": None,   # (username, playlist_id, name)
+    "pl_view_show_sp": False,
+    "pl_view_show_dz": False,
 }
 for _key, _val in _DEFAULTS.items():
     if _key not in st.session_state:
@@ -131,12 +133,6 @@ def _cached_pending_requests(user_id):
 
 with st.sidebar:
     st.header("👤 My Account")
-
-    # ── DB backend indicator ──────────────────────────────────────────────────
-    if db._use_pg():
-        st.caption("🟢 Connected to database")
-    else:
-        st.warning("⚠️ Using local storage — accounts will reset on redeploy. Set DATABASE_URL in Streamlit secrets to fix this.")
 
     if not st.session_state["user"]:
         tab_login, tab_reg = st.tabs(["Login", "Register"])
@@ -256,32 +252,37 @@ with st.sidebar:
             st.write("---")
             with st.expander("📊 Your Taste Profile"):
                 total_discovered = len(st.session_state["tracks"]) + st.session_state["current_index"]
-                st.write(f"**Songs discovered this session:** {total_discovered}")
-
                 _playlists = _cached_user_playlists(user["id"])
                 total_saved = sum(_cached_playlist_track_count(pl["id"]) for pl in _playlists)
-                st.write(f"**Liked:** {len(st.session_state['liked_songs'])}  |  **Saved in playlists:** {total_saved}")
+
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Discovered", total_discovered)
+                m2.metric("Liked", len(st.session_state["liked_songs"]))
+                m3.metric("Saved", total_saved)
 
                 liked_songs = st.session_state["liked_songs"]
+
+                # Genre chart
                 genre_counts = collections.Counter(
-                    t.get("_genre", "") for t in liked_songs if t.get("_genre")
+                    t.get("_genre", "").replace("-", " ").title()
+                    for t in liked_songs if t.get("_genre")
                 )
                 if genre_counts:
-                    top_genre = genre_counts.most_common(1)[0][0]
-                    st.write(f"**Top genre:** {top_genre.replace('-', ' ').title()}")
+                    st.write("**🎵 Your genres**")
+                    st.bar_chart(dict(genre_counts.most_common(6)))
 
+                # Mood chart (from DB)
+                mood_stats = db.get_mood_stats(user["id"])
+                if mood_stats:
+                    st.write("**🎭 Your moods**")
+                    st.bar_chart(mood_stats)
+
+                # Top vibe (text only — vibes are full phrases, not great for charts)
                 vibe_counts = collections.Counter(
                     t.get("_vibe", "") for t in liked_songs if t.get("_vibe")
                 )
                 if vibe_counts:
-                    top_vibe = vibe_counts.most_common(1)[0][0]
-                    st.write(f"**Top vibe:** {top_vibe}")
-
-                mood_stats = db.get_mood_stats(user["id"])
-                if mood_stats:
-                    st.write("**🎭 Your top moods:**")
-                    for mood, count in mood_stats.items():
-                        st.caption(f"{mood} — {count}x")
+                    st.caption(f"Top vibe: **{vibe_counts.most_common(1)[0][0]}**")
 
         # ── Friends ───────────────────────────────────────────────────────────
         st.write("---")
@@ -290,8 +291,9 @@ with st.sidebar:
             st.write("**Add a friend**")
             add_username = st.text_input("Friend's username", key="add_friend_input", placeholder="e.g. alice")
             if st.button("Send request", key="send_friend_btn", use_container_width=True):
-                if add_username.strip():
-                    result = db.send_friend_request(user["id"], add_username.strip())
+                _target = add_username.strip()[:50]
+                if _target:
+                    result = db.send_friend_request(user["id"], _target)
                     if result == "sent":
                         st.success(f"Friend request sent to **{add_username.strip()}**!")
                     elif result == "not_found":
@@ -490,8 +492,8 @@ def start_new_session(query, mode="search", vibe_label=None):
     # Also exclude songs already saved in any DB playlist for this user
     user = st.session_state.get("user")
     if user:
-        for pl in db.get_user_playlists(user["id"]):
-            for t in db.get_playlist_tracks(pl["id"]):
+        for pl in _cached_user_playlists(user["id"]):
+            for t in _cached_playlist_tracks(pl["id"]):
                 if t.get("id"):
                     seen_ids.add(t["id"])
 
@@ -551,8 +553,11 @@ st.write("")
 search_query = st.text_input("Search an artist, song, or genre", placeholder="e.g. Taylor Swift, jazz, The Weeknd")
 
 if st.button("Start discovering 🎧"):
-    if search_query.strip():
-        start_new_session(search_query, mode="search", vibe_label=search_query)
+    q = search_query.strip()[:100]   # cap at 100 chars
+    if q:
+        start_new_session(q, mode="search", vibe_label=q)
+    else:
+        st.warning("Please enter an artist, song, or genre first.")
 
 # ── Emotion picker ───────────────────────────────────────────────────────────
 st.write("**How are you feeling?**")
@@ -779,8 +784,8 @@ else:
         cover = current_track.get("album", {}).get("cover_big") or current_track.get("album", {}).get("cover_medium") or current_track.get("album", {}).get("cover")
         if cover:
             st.image(cover)
-        st.subheader(current_track["title"])
-        st.write(f"by **{current_track['artist']['name']}**")
+        st.subheader(current_track.get("title", "Unknown Title"))
+        st.write(f"by **{current_track.get('artist', {}).get('name', 'Unknown Artist')}**")
         progress = (index + 1) / len(tracks)
         st.progress(progress)
         st.caption(f"Song {index + 1} of {len(tracks)}")
