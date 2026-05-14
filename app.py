@@ -97,10 +97,6 @@ def playlist_to_csv(tracks):
 # ── Cached DB helpers (defined before sidebar so they're available everywhere) ─
 
 @st.cache_data(ttl=60)
-def _cached_social_feed():
-    return db.get_social_feed(limit=8)
-
-@st.cache_data(ttl=60)
 def _cached_top_liked():
     return db.get_top_liked(limit=8)
 
@@ -513,12 +509,6 @@ def get_recommended_recipe(liked_songs):
 
 # ── UI ───────────────────────────────────────────────────────────────────────
 
-social = _cached_social_feed()
-if social:
-    with st.expander("👥 What people are listening to", expanded=False):
-        for username, t in social:
-            st.write(f"**{username}** liked **{t['title']}** by {t['artist']['name']}")
-
 # ── Most Loved This Week ──────────────────────────────────────────────────────
 top_songs = _cached_top_liked()
 if top_songs:
@@ -813,7 +803,6 @@ else:
             if st.button("👍 Like"):
                 db.record_interaction(current_track, "like")
                 if st.session_state.get("user"):
-                    db.record_social_like(st.session_state["user"]["username"], current_track)
                     db.save_liked_song(st.session_state["user"]["id"], current_track)
                 st.session_state["liked_songs"].append(current_track)
                 st.session_state["current_index"] += 1
@@ -826,7 +815,6 @@ else:
                 else:
                     db.record_interaction(current_track, "like")
                     if st.session_state.get("user"):
-                        db.record_social_like(st.session_state["user"]["username"], current_track)
                         db.save_liked_song(st.session_state["user"]["id"], current_track)
                     st.session_state["saved_playlist"].append(current_track)
                 st.session_state["current_index"] += 1
