@@ -10,16 +10,27 @@ from datetime import datetime
 
 # ── Backend detection ─────────────────────────────────────────────────────────
 
-def _db_url():
-    try:
-        import streamlit as st
-        return st.secrets.get("DATABASE_URL") or st.secrets.get("database_url")
-    except Exception:
-        return None
+_DB_URL_CACHE = None
 
+def _db_url():
+    global _DB_URL_CACHE
+    if _DB_URL_CACHE is None:
+        try:
+            import streamlit as st
+            _DB_URL_CACHE = st.secrets.get("DATABASE_URL") or st.secrets.get("database_url") or ""
+        except Exception:
+            _DB_URL_CACHE = ""
+    return _DB_URL_CACHE or None
+
+
+# Cache the result so st.secrets is only read once per server process
+_PG_ENABLED = None
 
 def _use_pg():
-    return bool(_db_url())
+    global _PG_ENABLED
+    if _PG_ENABLED is None:
+        _PG_ENABLED = bool(_db_url())
+    return _PG_ENABLED
 
 
 # ── Connection helpers ────────────────────────────────────────────────────────

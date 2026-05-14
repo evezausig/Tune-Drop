@@ -14,7 +14,13 @@ import spotify_export
 import db
 import auth
 
-db.init_db()
+# Run schema init once per server process, not on every rerun
+@st.cache_resource
+def _init_db_once():
+    db.init_db()
+    return True
+
+_init_db_once()
 
 st.title("Tune-Drop 🎵")
 st.write("Discover new music, one song at a time")
