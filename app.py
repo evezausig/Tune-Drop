@@ -176,8 +176,8 @@ with st.sidebar:
         st.write(f"**{user['username']}**")
 
         if st.button("Logout", use_container_width=True):
-            st.session_state["user"] = None
-            st.session_state["renaming_pl_id"] = None
+            for _k, _v in _DEFAULTS.items():
+                st.session_state[_k] = _v
             st.rerun()
 
         st.write("---")
@@ -195,6 +195,7 @@ with st.sidebar:
                         st.session_state["open_playlist_tracks"] = _cached_playlist_tracks(pl["id"])
                         st.session_state["open_playlist_name"] = pl["name"]
                         st.session_state["open_playlist_is_liked"] = False
+                        st.session_state["open_friends_view"] = False
                         st.rerun()
 
                     csv_data = playlist_to_csv(_cached_playlist_tracks(pl["id"]))
@@ -219,6 +220,7 @@ with st.sidebar:
                         db.delete_playlist(pl["id"], user["id"])
                         _cached_user_playlists.clear()
                         _cached_playlist_track_count.clear()
+                        _cached_playlist_tracks.clear()
                         st.rerun()
 
                 if st.session_state["renaming_pl_id"] == pl["id"]:
@@ -242,6 +244,7 @@ with st.sidebar:
                 st.session_state["open_playlist_tracks"] = "liked"
                 st.session_state["open_playlist_name"] = "👍 Liked Songs"
                 st.session_state["open_playlist_is_liked"] = True
+                st.session_state["open_friends_view"] = False
                 st.rerun()
 
             if st.button("🗑️ Clear liked songs", use_container_width=True):
@@ -503,6 +506,11 @@ def start_new_session(query, mode="search", vibe_label=None):
     st.session_state["current_index"] = 0
     st.session_state["selected_emotion"] = None
     st.session_state["selected_genre"] = None
+    st.session_state["open_playlist_tracks"] = None
+    st.session_state["open_playlist_name"] = None
+    st.session_state["open_playlist_is_liked"] = False
+    st.session_state["open_friends_view"] = False
+    st.session_state["open_friend_playlist"] = None
 
 
 def get_recommended_recipe(liked_songs):
@@ -885,6 +893,7 @@ else:
                     st.session_state["saved_playlist"] = []
                     _cached_user_playlists.clear()
                     _cached_playlist_track_count.clear()
+                    _cached_playlist_tracks.clear()
                     st.success(f"✅ Saved to **{new_pl_name}**! Like new songs to build your next playlist.")
                     st.rerun()
                 else:
@@ -896,6 +905,7 @@ else:
                 db.add_tracks_to_playlist(pl_id, saved_playlist)
                 st.session_state["saved_playlist"] = []
                 _cached_playlist_track_count.clear()
+                _cached_playlist_tracks.clear()
                 st.success(f"✅ Added to **{chosen}**! Like new songs to build your next playlist.")
                 st.rerun()
     else:

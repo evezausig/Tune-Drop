@@ -79,14 +79,7 @@ class _PooledConn:
 
 def _pg_conn():
     pool = _get_pg_pool()
-    try:
-        conn = pool.getconn()
-    except Exception:
-        # Pool exhausted or stale — force a new direct connection as fallback
-        import psycopg2
-        conn = psycopg2.connect(_db_url(), sslmode="require")
-        conn.autocommit = False
-        return conn
+    conn = pool.getconn()   # raises if pool exhausted — caller should handle
     conn.autocommit = False
     return _PooledConn(conn, pool)
 
