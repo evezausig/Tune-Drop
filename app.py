@@ -150,12 +150,12 @@ with st.sidebar:
         st.write("---")
         st.write("**🎵 My Playlists**")
 
-        playlists = db.get_user_playlists(user["id"])
+        playlists = _cached_user_playlists(user["id"])
         if not playlists:
             st.caption("No saved playlists yet.")
 
         for pl in playlists:
-            track_count = db.get_playlist_track_count(pl["id"])
+            track_count = _cached_playlist_track_count(pl["id"])
             with st.expander(f"📋 {pl['name']} ({track_count} songs)"):
                 if track_count > 0:
                     if st.button("▶️ Open playlist", key=f"open_{pl['id']}", use_container_width=True):
@@ -184,6 +184,8 @@ with st.sidebar:
                 with col_d:
                     if st.button("🗑️ Delete", key=f"del_{pl['id']}", use_container_width=True):
                         db.delete_playlist(pl["id"], user["id"])
+                        _cached_user_playlists.clear()
+                        _cached_playlist_track_count.clear()
                         st.rerun()
 
                 if st.session_state["renaming_pl_id"] == pl["id"]:
@@ -192,6 +194,7 @@ with st.sidebar:
                         if new_name.strip():
                             db.rename_playlist(pl["id"], new_name.strip(), user["id"])
                             st.session_state["renaming_pl_id"] = None
+                            _cached_user_playlists.clear()
                             st.rerun()
 
         # ── Liked Songs ───────────────────────────────────────────────────────
@@ -260,7 +263,7 @@ with st.sidebar:
                         st.info("Friend request already sent or you're already friends.")
 
             # Pending requests
-            pending = db.get_pending_requests(user["id"])
+            pending = _cached_pending_requests(user["id"])
             if pending:
                 st.write("**Pending requests**")
                 for req in pending:
@@ -276,7 +279,7 @@ with st.sidebar:
                             st.rerun()
 
             # Friends list
-            friends = db.get_friends(user["id"])
+            friends = _cached_friends(user["id"])
             if friends:
                 st.write("**Your friends**")
                 for f in friends:
@@ -491,6 +494,22 @@ def _cached_top_liked():
 @st.cache_data(ttl=120)
 def _cached_playlist_tracks(playlist_id):
     return db.get_playlist_tracks(playlist_id)
+
+@st.cache_data(ttl=30)
+def _cached_user_playlists(user_id):
+    return db.get_user_playlists(user_id)
+
+@st.cache_data(ttl=30)
+def _cached_playlist_track_count(playlist_id):
+    return db.get_playlist_track_count(playlist_id)
+
+@st.cache_data(ttl=30)
+def _cached_friends(user_id):
+    return db.get_friends(user_id)
+
+@st.cache_data(ttl=20)
+def _cached_pending_requests(user_id):
+    return db.get_pending_requests(user_id)
 
 social = _cached_social_feed()
 if social:
@@ -839,7 +858,7 @@ else:
     if st.session_state["user"]:
         st.subheader("💾 Save to my account")
         user = st.session_state["user"]
-        existing = db.get_user_playlists(user["id"])
+        existing = _cached_user_playlists(user["id"])
         pl_names = [pl["name"] for pl in existing]
 
         save_mode = st.radio(
@@ -856,6 +875,8 @@ else:
                     pl_id = db.create_playlist(user["id"], new_pl_name.strip())
                     db.add_tracks_to_playlist(pl_id, saved_playlist)
                     st.session_state["saved_playlist"] = []
+                    _cached_user_playlists.clear()
+                    _cached_playlist_track_count.clear()
                     st.success(f"✅ Saved to **{new_pl_name}**! Like new songs to build your next playlist.")
                     st.rerun()
                 else:
@@ -866,6 +887,7 @@ else:
                 pl_id = next(pl["id"] for pl in existing if pl["name"] == chosen)
                 db.add_tracks_to_playlist(pl_id, saved_playlist)
                 st.session_state["saved_playlist"] = []
+                _cached_playlist_track_count.clear()
                 st.success(f"✅ Added to **{chosen}**! Like new songs to build your next playlist.")
                 st.rerun()
     else:

@@ -27,14 +27,57 @@ def _use_pg():
 SQLITE_PATH = "tune_drop.db"
 
 
+def _get_pg_pool():
+    """Return a shared connection pool (created once, reused across all requests)."""
+    import streamlit as st
+    import psycopg2.pool
+
+    @st.cache_resource
+    def _make_pool():
+        return psycopg2.pool.ThreadedConnectionPool(
+            minconn=1, maxconn=5, dsn=_db_url(), sslmode="require"
+        )
+
+    return _make_pool()
+
+
+class _PooledConn:
+    """Wraps a pooled connection so .close() returns it to the pool instead of dropping it."""
+    def __init__(self, conn, pool):
+        self._conn = conn
+        self._pool = pool
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def cursor(self):
+        return self._conn.cursor()
+
+    def commit(self):
+        self._conn.commit()
+
+    def rollback(self):
+        self._conn.rollback()
+
+    def close(self):
+        try:
+            self._pool.putconn(self._conn)
+        except Exception:
+            pass
+
+
 def _pg_conn():
-    import psycopg2
-    import psycopg2.extras
-    url = _db_url()
-    # Supabase (and most managed PostgreSQL) requires SSL
-    conn = psycopg2.connect(url, sslmode="require")
+    pool = _get_pg_pool()
+    try:
+        conn = pool.getconn()
+    except Exception:
+        # Pool exhausted or stale — force a new direct connection as fallback
+        import psycopg2
+        conn = psycopg2.connect(_db_url(), sslmode="require")
+        conn.autocommit = False
+        return conn
     conn.autocommit = False
-    return conn
+    return _PooledConn(conn, pool)
 
 
 def _sqlite_conn():
