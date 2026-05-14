@@ -798,7 +798,7 @@ else:
         st.markdown(
             f'<audio id="player-{current_track["id"]}" autoplay controls '
             f'style="width:100%;border-radius:12px;margin:8px 0">'
-            f'<source src="{current_track["preview"]}?v={current_track["id"]}" type="audio/mpeg">'
+            f'<source src="{current_track["preview"]}" type="audio/mpeg">'
             f'</audio>',
             unsafe_allow_html=True,
         )
