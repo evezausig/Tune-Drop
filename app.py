@@ -248,7 +248,10 @@ with st.sidebar:
             with st.expander("📊 Your Taste Profile"):
                 total_discovered = len(st.session_state["tracks"]) + st.session_state["current_index"]
                 st.write(f"**Songs discovered this session:** {total_discovered}")
-                st.write(f"**Liked:** {len(st.session_state['liked_songs'])}  |  **Saved:** {len(st.session_state['saved_playlist'])}")
+
+                _playlists = _cached_user_playlists(user["id"])
+                total_saved = sum(_cached_playlist_track_count(pl["id"]) for pl in _playlists)
+                st.write(f"**Liked:** {len(st.session_state['liked_songs'])}  |  **Saved in playlists:** {total_saved}")
 
                 liked_songs = st.session_state["liked_songs"]
                 genre_counts = collections.Counter(
