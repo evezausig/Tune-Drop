@@ -793,7 +793,15 @@ else:
         if info_parts:
             st.caption(" · ".join(info_parts))
 
-        st.audio(current_track["preview"])
+        # Autoplay: use HTML audio tag — browsers allow this after a user click (Skip/Like/Save)
+        # Cache-bust with track ID so the browser treats each song as a new element
+        st.markdown(
+            f'<audio id="player-{current_track["id"]}" autoplay controls '
+            f'style="width:100%;border-radius:12px;margin:8px 0">'
+            f'<source src="{current_track["preview"]}?v={current_track["id"]}" type="audio/mpeg">'
+            f'</audio>',
+            unsafe_allow_html=True,
+        )
 
         col1, col2, col3 = st.columns(3)
         with col1:
