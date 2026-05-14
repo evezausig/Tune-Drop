@@ -99,6 +99,12 @@ def playlist_to_csv(tracks):
 with st.sidebar:
     st.header("👤 My Account")
 
+    # ── DB backend indicator ──────────────────────────────────────────────────
+    if db._use_pg():
+        st.caption("🟢 Connected to database")
+    else:
+        st.warning("⚠️ Using local storage — accounts will reset on redeploy. Set DATABASE_URL in Streamlit secrets to fix this.")
+
     if not st.session_state["user"]:
         tab_login, tab_reg = st.tabs(["Login", "Register"])
 
