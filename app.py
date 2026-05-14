@@ -94,6 +94,37 @@ def playlist_to_csv(tracks):
     return output.getvalue()
 
 
+# ── Cached DB helpers (defined before sidebar so they're available everywhere) ─
+
+@st.cache_data(ttl=60)
+def _cached_social_feed():
+    return db.get_social_feed(limit=8)
+
+@st.cache_data(ttl=60)
+def _cached_top_liked():
+    return db.get_top_liked(limit=8)
+
+@st.cache_data(ttl=120)
+def _cached_playlist_tracks(playlist_id):
+    return db.get_playlist_tracks(playlist_id)
+
+@st.cache_data(ttl=30)
+def _cached_user_playlists(user_id):
+    return db.get_user_playlists(user_id)
+
+@st.cache_data(ttl=30)
+def _cached_playlist_track_count(playlist_id):
+    return db.get_playlist_track_count(playlist_id)
+
+@st.cache_data(ttl=30)
+def _cached_friends(user_id):
+    return db.get_friends(user_id)
+
+@st.cache_data(ttl=20)
+def _cached_pending_requests(user_id):
+    return db.get_pending_requests(user_id)
+
+
 # ── Sidebar — account / saved playlists ──────────────────────────────────────
 
 with st.sidebar:
@@ -481,35 +512,6 @@ def get_recommended_recipe(liked_songs):
 
 
 # ── UI ───────────────────────────────────────────────────────────────────────
-
-# ── Social Feed ──────────────────────────────────────────────────────────────
-@st.cache_data(ttl=60)
-def _cached_social_feed():
-    return db.get_social_feed(limit=8)
-
-@st.cache_data(ttl=60)
-def _cached_top_liked():
-    return db.get_top_liked(limit=8)
-
-@st.cache_data(ttl=120)
-def _cached_playlist_tracks(playlist_id):
-    return db.get_playlist_tracks(playlist_id)
-
-@st.cache_data(ttl=30)
-def _cached_user_playlists(user_id):
-    return db.get_user_playlists(user_id)
-
-@st.cache_data(ttl=30)
-def _cached_playlist_track_count(playlist_id):
-    return db.get_playlist_track_count(playlist_id)
-
-@st.cache_data(ttl=30)
-def _cached_friends(user_id):
-    return db.get_friends(user_id)
-
-@st.cache_data(ttl=20)
-def _cached_pending_requests(user_id):
-    return db.get_pending_requests(user_id)
 
 social = _cached_social_feed()
 if social:
