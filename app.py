@@ -365,15 +365,15 @@ def get_tracks_from_artist_discovery(artist_name):
         return []
     main_artist_id = artists[0]["id"]
     all_tracks = []
-    top_url = f"https://api.deezer.com/artist/{main_artist_id}/top?limit=5"
+    top_url = f"https://api.deezer.com/artist/{main_artist_id}/top?limit=10"
     top_response = _deezer_get(top_url)
     if top_response is not None:
         all_tracks.extend(top_response.json().get("data", []))
     related_url = f"https://api.deezer.com/artist/{main_artist_id}/related"
     related_response = _deezer_get(related_url)
     similar_artists = related_response.json().get("data", []) if related_response is not None else []
-    for artist in similar_artists[:8]:
-        artist_top_url = f"https://api.deezer.com/artist/{artist['id']}/top?limit=3"
+    for artist in similar_artists[:12]:
+        artist_top_url = f"https://api.deezer.com/artist/{artist['id']}/top?limit=4"
         artist_top_response = _deezer_get(artist_top_url)
         if artist_top_response is not None:
             all_tracks.extend(artist_top_response.json().get("data", []))
@@ -409,10 +409,10 @@ def _fetch_one_deezer_track(song):
 
 def get_tracks_from_recipe(recipe):
     """Filters the dataset by emotion recipe, then fetches Deezer tracks in parallel."""
-    matching_songs = find_matching_songs(recipe, limit=25)
+    matching_songs = find_matching_songs(recipe, limit=50)
     if not matching_songs:
         return []
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=20) as executor:
         results = executor.map(_fetch_one_deezer_track, matching_songs)
     return [t for t in results if t is not None]
 
