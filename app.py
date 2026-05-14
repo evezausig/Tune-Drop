@@ -86,6 +86,7 @@ div[data-testid="stCaptionContainer"] {
 
 
 def playlist_to_csv(tracks):
+    """Converts a list of Deezer track dicts to a CSV string with Spotify search links."""
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["Title", "Artist", "Album", "Deezer Link", "Spotify Search"])
@@ -432,6 +433,7 @@ def get_tracks_from_recipe(recipe):
 
 
 def _limit_per_artist(tracks, max_per_artist=3):
+    """Caps the number of songs per artist to ensure variety in the discovery queue."""
     counts = {}
     result = []
     for t in tracks:
@@ -516,7 +518,8 @@ def start_new_session(query, mode="search", vibe_label=None):
 
 
 def get_recommended_recipe(liked_songs):
-    """Builds a recipe dict from the top genres in liked songs."""
+    """Builds an audio-feature recipe from the top genres in the user's liked songs.
+    Returns a dict suitable for find_matching_songs(), or None if no genre data exists."""
     genre_counts = collections.Counter(
         t.get("_genre", "") for t in liked_songs if t.get("_genre")
     )
@@ -781,35 +784,43 @@ else:
     if tracks and index < len(tracks):
         current_track = tracks[index]
         st.write("---")
-        cover = current_track.get("album", {}).get("cover_big") or current_track.get("album", {}).get("cover_medium") or current_track.get("album", {}).get("cover")
-        if cover:
-            st.image(cover)
-        st.subheader(current_track.get("title", "Unknown Title"))
-        st.write(f"by **{current_track.get('artist', {}).get('name', 'Unknown Artist')}**")
+
+        # Progress bar above the card
         progress = (index + 1) / len(tracks)
         st.progress(progress)
         st.caption(f"Song {index + 1} of {len(tracks)}")
 
-        # ── Why This Song? ────────────────────────────────────────────────
-        info_parts = []
-        album_id = current_track.get("album", {}).get("id")
-        year = _get_release_year(album_id) if album_id else ""
-        if year:
-            info_parts.append(f"📅 {year}")
-        genre_tag = current_track.get("_genre", "")
-        if genre_tag:
-            info_parts.append(f"🎵 {genre_tag.replace('-', ' ').title()}")
-        vibe_tag = current_track.get("_vibe", "")
-        if vibe_tag:
-            info_parts.append(f"🎭 {vibe_tag}")
-        if info_parts:
-            st.caption(" · ".join(info_parts))
+        # Song card
+        with st.container(border=True):
+            cover = (current_track.get("album", {}).get("cover_big")
+                     or current_track.get("album", {}).get("cover_medium")
+                     or current_track.get("album", {}).get("cover"))
+            if cover:
+                st.image(cover)
 
-        st.audio(current_track["preview"])
+            st.subheader(current_track.get("title", "Unknown Title"))
+            st.write(f"by **{current_track.get('artist', {}).get('name', 'Unknown Artist')}**")
+
+            # Why this song?
+            info_parts = []
+            album_id = current_track.get("album", {}).get("id")
+            year = _get_release_year(album_id) if album_id else ""
+            if year:
+                info_parts.append(f"📅 {year}")
+            genre_tag = current_track.get("_genre", "")
+            if genre_tag:
+                info_parts.append(f"🎵 {genre_tag.replace('-', ' ').title()}")
+            vibe_tag = current_track.get("_vibe", "")
+            if vibe_tag:
+                info_parts.append(f"🎭 {vibe_tag}")
+            if info_parts:
+                st.caption(" · ".join(info_parts))
+
+            st.audio(current_track["preview"])
 
         col1, col2, col3 = st.columns(3)
         with col1:
-            if st.button("👎 Skip"):
+            if st.button("👎 Skip", use_container_width=True):
                 try:
                     db.record_interaction(current_track, "skip")
                 except Exception:
@@ -817,7 +828,7 @@ else:
                 st.session_state["current_index"] += 1
                 st.rerun()
         with col2:
-            if st.button("👍 Like"):
+            if st.button("👍 Like", use_container_width=True):
                 try:
                     db.record_interaction(current_track, "like")
                     if st.session_state.get("user"):
@@ -826,12 +837,13 @@ else:
                     pass
                 st.session_state["liked_songs"].append(current_track)
                 st.session_state["current_index"] += 1
+                st.toast("Added to liked songs!", icon="👍")
                 st.rerun()
         with col3:
-            if st.button("❤️ Save"):
+            if st.button("❤️ Save", use_container_width=True):
                 saved_ids = {t["id"] for t in st.session_state["saved_playlist"] if t.get("id")}
                 if current_track.get("id") in saved_ids:
-                    st.toast("Already in your playlist!")
+                    st.toast("Already in your playlist!", icon="ℹ️")
                 else:
                     try:
                         db.record_interaction(current_track, "like")
@@ -840,6 +852,7 @@ else:
                     except Exception:
                         pass
                     st.session_state["saved_playlist"].append(current_track)
+                    st.toast("Saved to your playlist!", icon="❤️")
                 st.session_state["current_index"] += 1
                 st.rerun()
 
