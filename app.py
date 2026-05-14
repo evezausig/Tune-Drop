@@ -796,14 +796,20 @@ else:
         col1, col2, col3 = st.columns(3)
         with col1:
             if st.button("👎 Skip"):
-                db.record_interaction(current_track, "skip")
+                try:
+                    db.record_interaction(current_track, "skip")
+                except Exception:
+                    pass
                 st.session_state["current_index"] += 1
                 st.rerun()
         with col2:
             if st.button("👍 Like"):
-                db.record_interaction(current_track, "like")
-                if st.session_state.get("user"):
-                    db.save_liked_song(st.session_state["user"]["id"], current_track)
+                try:
+                    db.record_interaction(current_track, "like")
+                    if st.session_state.get("user"):
+                        db.save_liked_song(st.session_state["user"]["id"], current_track)
+                except Exception:
+                    pass
                 st.session_state["liked_songs"].append(current_track)
                 st.session_state["current_index"] += 1
                 st.rerun()
@@ -813,9 +819,12 @@ else:
                 if current_track.get("id") in saved_ids:
                     st.toast("Already in your playlist!")
                 else:
-                    db.record_interaction(current_track, "like")
-                    if st.session_state.get("user"):
-                        db.save_liked_song(st.session_state["user"]["id"], current_track)
+                    try:
+                        db.record_interaction(current_track, "like")
+                        if st.session_state.get("user"):
+                            db.save_liked_song(st.session_state["user"]["id"], current_track)
+                    except Exception:
+                        pass
                     st.session_state["saved_playlist"].append(current_track)
                 st.session_state["current_index"] += 1
                 st.rerun()
