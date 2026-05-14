@@ -30,7 +30,9 @@ SQLITE_PATH = "tune_drop.db"
 def _pg_conn():
     import psycopg2
     import psycopg2.extras
-    conn = psycopg2.connect(_db_url())
+    url = _db_url()
+    # Supabase (and most managed PostgreSQL) requires SSL
+    conn = psycopg2.connect(url, sslmode="require")
     conn.autocommit = False
     return conn
 
@@ -61,10 +63,15 @@ def _ph():
 # ── Schema init ───────────────────────────────────────────────────────────────
 
 def init_db():
-    if _use_pg():
-        _init_pg()
-    else:
-        _init_sqlite()
+    try:
+        if _use_pg():
+            _init_pg()
+        else:
+            _init_sqlite()
+    except Exception as e:
+        # Log but don't crash — the app can still run read-only if DB is temporarily down
+        import streamlit as st
+        st.error(f"⚠️ Database connection failed: {e}\n\nCheck your DATABASE_URL in Streamlit secrets, or try refreshing in a moment.")
 
 
 def _init_sqlite():
