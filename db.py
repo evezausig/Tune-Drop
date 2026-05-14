@@ -333,6 +333,14 @@ def delete_playlist(playlist_id, user_id):
 
 # ── Tracks ────────────────────────────────────────────────────────────────────
 
+def get_playlist_track_count(playlist_id):
+    """Fast COUNT query — avoids loading all track JSON just for the count."""
+    conn = get_db()
+    ph = _ph()
+    rows = _fetchall(conn, f"SELECT COUNT(*) as cnt FROM playlist_tracks WHERE playlist_id = {ph}", (playlist_id,))
+    conn.close()
+    return rows[0]["cnt"] if rows else 0
+
 def add_tracks_to_playlist(playlist_id, tracks):
     conn = get_db()
     ph = _ph()

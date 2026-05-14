@@ -155,16 +155,16 @@ with st.sidebar:
             st.caption("No saved playlists yet.")
 
         for pl in playlists:
-            tracks = db.get_playlist_tracks(pl["id"])
-            with st.expander(f"📋 {pl['name']} ({len(tracks)} songs)"):
-                if tracks:
+            track_count = db.get_playlist_track_count(pl["id"])
+            with st.expander(f"📋 {pl['name']} ({track_count} songs)"):
+                if track_count > 0:
                     if st.button("▶️ Open playlist", key=f"open_{pl['id']}", use_container_width=True):
-                        st.session_state["open_playlist_tracks"] = tracks
+                        st.session_state["open_playlist_tracks"] = _cached_playlist_tracks(pl["id"])
                         st.session_state["open_playlist_name"] = pl["name"]
                         st.session_state["open_playlist_is_liked"] = False
                         st.rerun()
 
-                    csv_data = playlist_to_csv(tracks)
+                    csv_data = playlist_to_csv(_cached_playlist_tracks(pl["id"]))
                     st.download_button(
                         "⬇️ Download CSV",
                         data=csv_data,
@@ -480,14 +480,26 @@ def get_recommended_recipe(liked_songs):
 # ── UI ───────────────────────────────────────────────────────────────────────
 
 # ── Social Feed ──────────────────────────────────────────────────────────────
-social = db.get_social_feed(limit=8)
+@st.cache_data(ttl=60)
+def _cached_social_feed():
+    return db.get_social_feed(limit=8)
+
+@st.cache_data(ttl=60)
+def _cached_top_liked():
+    return db.get_top_liked(limit=8)
+
+@st.cache_data(ttl=120)
+def _cached_playlist_tracks(playlist_id):
+    return db.get_playlist_tracks(playlist_id)
+
+social = _cached_social_feed()
 if social:
     with st.expander("👥 What people are listening to", expanded=False):
         for username, t in social:
             st.write(f"**{username}** liked **{t['title']}** by {t['artist']['name']}")
 
 # ── Most Loved This Week ──────────────────────────────────────────────────────
-top_songs = db.get_top_liked(limit=8)
+top_songs = _cached_top_liked()
 if top_songs:
     with st.expander("🔥 Most Loved This Week", expanded=False):
         for t, likes in top_songs:
